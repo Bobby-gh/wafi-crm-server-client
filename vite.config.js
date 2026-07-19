@@ -9,14 +9,4 @@ import react from "@vitejs/plugin-react";
 // lancer séparément avec `npm start` à la racine du projet).
 export default defineConfig({
   plugins: [react()],
-  build: {
-    outDir: "../public-app",
-    emptyOutDir: true,
-  },
-  server: {
-    proxy: {
-      "/api": "http://localhost:3000",
-      "/login.html": "http://localhost:3000",
-    },
-  },
 });
