@@ -412,8 +412,13 @@ export default function WafiCRM() {
     link.href = dataUrl;
     link.download = att.filename;
     document.body.appendChild(link);
-    link.click();
-    link.remove();
+    try {
+      link.click();
+    } finally {
+      if (link.parentNode) {
+        link.parentNode.removeChild(link);
+      }
+    }
   }
 
   /* ---------------- save / delete contact ---------------- */

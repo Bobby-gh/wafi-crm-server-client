@@ -1,7 +1,8 @@
 import axios from "axios";
 
+const runtimeApiUrl = typeof window !== "undefined" && window.__VITE_API_URL__;
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/",
+  baseURL: import.meta.env.VITE_API_URL || runtimeApiUrl || "/",
   withCredentials: true,
 });
 
