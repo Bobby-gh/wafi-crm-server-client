@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import api from "./api";
+import api, { setAuthToken, clearAuthToken } from "./api";
 import {
   Search, Plus, Paperclip, Download, X, Pencil, Settings2,
   LayoutDashboard, ListChecks, FileText, Trash2
@@ -48,12 +48,8 @@ const storage = {
       const { data } = await api.get("/api/storage/" + encodeURIComponent(key));
       return { key: data.key, value: data.value };
     } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "/login.html";
-        throw new Error("Session expirée");
-      }
-      if (err.response?.status === 404) throw new Error("not found");
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
+      if (err.response?.status === 404) return null;
+      throw err;
     }
   },
   set: async (key, value) => {
@@ -61,11 +57,7 @@ const storage = {
       const { data } = await api.put("/api/storage/" + encodeURIComponent(key), { value });
       return { key: data.key, value: data.value };
     } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "./login.html";
-        throw new Error("Session expirée");
-      }
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
+      throw err;
     }
   },
   delete: async (key) => {
@@ -73,12 +65,16 @@ const storage = {
       await api.delete("/api/storage/" + encodeURIComponent(key));
       return { key, deleted: true };
     } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "/login.html";
-        throw new Error("Session expirée");
-      }
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
+      throw err;
     }
+  },
+  list: async (prefix = "") => {
+    const { data } = await api.get("/api/storage", { params: prefix ? { prefix } : {} });
+    return data;
+  },
+  listKeys: async () => {
+    const { data } = await api.get("/api/storage/keys");
+    return data.keys || [];
   },
 };
 
@@ -204,36 +200,105 @@ export default function WafiCRM() {
   const [defaultDelayDraft, setDefaultDelayDraft] = useState(30);
 
   const [username, setUsername] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState({ username: "", password: "", email: "" });
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
+  function resetSession() {
+    clearAuthToken();
+    setUsername("");
+    setIsAuthenticated(false);
+    setContacts([]);
+    setSettings({ defaultDelayDays: 30 });
+    setAuthError("");
+  }
+
+  async function loadStoredData() {
+    try {
+      const res = await storage.get(STORAGE_KEY);
+      const parsed = res?.value ? JSON.parse(res.value) : null;
+      setContacts(parsed?.contacts || []);
+      setSettings(parsed?.settings || { defaultDelayDays: 30 });
+    } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+        return;
+      }
+      setContacts([]);
+      setSettings({ defaultDelayDays: 30 });
+    }
+  }
 
   /* ---------------- auth + load / save ---------------- */
   useEffect(() => {
     (async () => {
       try {
-        const meRes = await api.get("/api/me");
-        setUsername(meRes.data.username || "");
-
-        const res = await storage.get(STORAGE_KEY);
-        const parsed = res && res.value ? JSON.parse(res.value) : null;
-        setContacts(parsed?.contacts || []);
-        setSettings(parsed?.settings || { defaultDelayDays: 30 });
-      } catch (e) {
-        if (e.response?.status === 401 || e.isAxiosError) {
-          window.location.href = "/login.html";
+        const token = localStorage.getItem("wafi_token");
+        if (!token) {
+          setIsAuthenticated(false);
+          setLoading(false);
           return;
         }
-        setContacts([]);
-        setSettings({ defaultDelayDays: 30 });
+
+        const meRes = await api.get("/api/me");
+        setUsername(meRes.data.username || localStorage.getItem("wafi_username") || "");
+        setIsAuthenticated(true);
+        await loadStoredData();
+      } catch (e) {
+        if (e.response?.status === 401) {
+          resetSession();
+        } else {
+          setIsAuthenticated(false);
+          setContacts([]);
+          setSettings({ defaultDelayDays: 30 });
+        }
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
+  async function handleAuthSubmit(e) {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError("");
+
+    try {
+      const endpoint = authMode === "signup" ? "/api/signup" : "/api/login";
+      const payload = authMode === "signup"
+        ? { username: authForm.username.trim(), password: authForm.password, email: authForm.email.trim() }
+        : { username: authForm.username.trim(), password: authForm.password };
+
+      const { data } = await api.post(endpoint, payload);
+      const nextUsername = data.username || payload.username;
+      setAuthToken(data.token, nextUsername);
+      setUsername(nextUsername);
+      setIsAuthenticated(true);
+      await loadStoredData();
+    } catch (e) {
+      if (e.response?.status === 401) {
+        setAuthError("Identifiants invalides.");
+      } else if (e.response?.status === 409) {
+        setAuthError("Ce nom d'utilisateur existe déjà.");
+      } else if (e.response?.status === 400) {
+        setAuthError("Vérifiez les informations saisies.");
+      } else {
+        setAuthError("Connexion impossible pour le moment.");
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
   async function handleLogout() {
     try {
       await api.post("/api/logout");
+    } catch (e) {
+      console.error("Erreur de déconnexion", e);
     } finally {
-      window.location.href = "/login.html";
+      resetSession();
     }
   }
 
@@ -244,6 +309,10 @@ export default function WafiCRM() {
         JSON.stringify({ contacts: nextContacts, settings: nextSettings })
       );
     } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+        return;
+      }
       console.error("Erreur d'enregistrement", e);
     }
   }, []);
@@ -439,6 +508,69 @@ export default function WafiCRM() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: C.paper, color: C.inkSoft }}>
         Chargement du registre…
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: C.paper, color: C.ink }}>
+        <div className="w-full max-w-md rounded-xl p-7" style={{ background: "#fff", border: `1px solid ${C.line}`, boxShadow: "0 20px 50px rgba(0,0,0,0.15)" }}>
+          <div className="text-center mb-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: C.gold500 }}>WAFI CAPITAL CRM</p>
+            <h1 className="text-2xl font-bold mt-2" style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
+              {authMode === "login" ? "Connexion" : "Créer un compte"}
+            </h1>
+            <p className="text-sm mt-2" style={{ color: C.inkSoft }}>
+              Utilisez votre compte pour synchroniser les données de stockage avec l’API backend.
+            </p>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="space-y-3">
+            <Field label="Nom d'utilisateur">
+              <input
+                required
+                value={authForm.username}
+                onChange={(e) => setAuthForm((f) => ({ ...f, username: e.target.value }))}
+                style={inputStyle}
+                autoComplete="username"
+              />
+            </Field>
+            {authMode === "signup" && (
+              <Field label="Email">
+                <input
+                  required
+                  type="email"
+                  value={authForm.email}
+                  onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
+                  style={inputStyle}
+                  autoComplete="email"
+                />
+              </Field>
+            )}
+            <Field label="Mot de passe">
+              <input
+                required
+                type="password"
+                value={authForm.password}
+                onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
+                style={inputStyle}
+                autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+              />
+            </Field>
+            {authError && <div className="text-sm" style={{ color: C.red }}>{authError}</div>}
+            <button type="submit" disabled={authLoading} className="w-full px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer", opacity: authLoading ? 0.7 : 1 }}>
+              {authLoading ? "Chargement…" : authMode === "login" ? "Se connecter" : "Créer mon compte"}
+            </button>
+          </form>
+
+          <div className="text-center text-sm mt-4" style={{ color: C.inkSoft }}>
+            {authMode === "login" ? "Pas encore de compte ?" : "Vous avez déjà un compte ?"}{" "}
+            <button type="button" onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setAuthError(""); }} style={{ background: "none", border: "none", color: C.navy800, cursor: "pointer", fontWeight: 700 }}>
+              {authMode === "login" ? "Créer un compte" : "Se connecter"}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
