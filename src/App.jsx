@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import api, { setAuthToken, clearAuthToken } from "./api";
 import {
-  Search, Plus, Paperclip, Download, X, Pencil, Settings2,
+  Search, Plus, Paperclip, Download, X, Pencil, Eye, Settings2,
   LayoutDashboard, ListChecks, FileText, Trash2
 } from "lucide-react";
 
@@ -187,6 +187,7 @@ export default function WafiCRM() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [detailRecord, setDetailRecord] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [exchanges, setExchanges] = useState([]);
   const [attachments, setAttachments] = useState([]);
@@ -205,6 +206,7 @@ export default function WafiCRM() {
   const [authForm, setAuthForm] = useState({ username: "", password: "", email: "" });
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   function resetSession() {
     clearAuthToken();
@@ -276,7 +278,14 @@ export default function WafiCRM() {
       setAuthToken(data.token, nextUsername);
       setUsername(nextUsername);
       setIsAuthenticated(true);
-      await loadStoredData();
+      try {
+        await loadStoredData();
+      } catch (e) {
+        console.error("Erreur de chargement du stockage après authentification", e);
+      }
+      if (typeof window !== "undefined") {
+        window.location.assign("/index.html");
+      }
     } catch (e) {
       if (e.response?.status === 401) {
         setAuthError("Identifiants invalides.");
@@ -353,6 +362,14 @@ export default function WafiCRM() {
     setEditingId(null);
   }
 
+  function openDetail(record) {
+    setDetailRecord(record);
+  }
+
+  function closeDetail() {
+    setDetailRecord(null);
+  }
+
   /* ---------------- exchanges ---------------- */
   function addExchange() {
     if (!exDraft.note.trim() || !exDraft.date) return;
@@ -394,8 +411,8 @@ export default function WafiCRM() {
     if (att && !att.isNew) setRemovedAttachmentIds(prev => [...prev, id]);
     setAttachments(prev => prev.filter(a => a.id !== id));
   }
-  async function downloadAttachment(id) {
-    const att = attachments.find(a => a.id === id);
+  async function downloadAttachment(id, list = attachments) {
+    const att = (list || attachments).find(a => a.id === id);
     if (!att) return;
     let dataUrl = att.dataUrl;
     if (!dataUrl) {
@@ -554,14 +571,34 @@ export default function WafiCRM() {
               </Field>
             )}
             <Field label="Mot de passe">
-              <input
-                required
-                type="password"
-                value={authForm.password}
-                onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
-                style={inputStyle}
-                autoComplete={authMode === "signup" ? "new-password" : "current-password"}
-              />
+              <div style={{ position: "relative" }}>
+                <input
+                  required
+                  type={passwordVisible ? "text" : "password"}
+                  value={authForm.password}
+                  onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
+                  style={{ ...inputStyle, paddingRight: 40 }}
+                  autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+                />
+                <button
+                  type="button"
+                  onClick={() => setPasswordVisible((v) => !v)}
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    right: 10,
+                    transform: "translateY(-50%)",
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    cursor: "pointer",
+                    color: C.inkSoft,
+                  }}
+                  aria-label={passwordVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                >
+                  {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </Field>
             {authError && <div className="text-sm" style={{ color: C.red }}>{authError}</div>}
             <button type="submit" disabled={authLoading} className="w-full px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer", opacity: authLoading ? 0.7 : 1 }}>
@@ -730,9 +767,14 @@ export default function WafiCRM() {
                           <div className="flex items-center text-xs"><Dot color={color} />{deadline.toLocaleDateString("fr-FR")}</div>
                         </td>
                         <td className="px-4 py-3.5 align-top">
-                          <button onClick={() => openEdit(c)} title="Modifier" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 4 }}>
-                            <Pencil size={15} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => openDetail(c)} title="Voir les détails" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 4 }}>
+                              <Eye size={15} />
+                            </button>
+                            <button onClick={() => openEdit(c)} title="Modifier" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 4 }}>
+                              <Pencil size={15} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -980,6 +1022,92 @@ export default function WafiCRM() {
               <button onClick={saveSettings} className="px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer" }}>
                 Enregistrer
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailRecord && (
+        <div className="fixed inset-0 z-50 flex" style={{ background: "rgba(10,24,48,0.45)" }} onClick={e => e.target === e.currentTarget && closeDetail()}>
+          <div className="ml-auto w-full max-w-xl h-full overflow-y-auto bg-white p-6 shadow-2xl" style={{ minHeight: "100%" }}>
+            <div className="flex items-start justify-between gap-3 mb-6">
+              <div>
+                <div className="text-[10px] font-bold uppercase" style={{ color: C.gold500, letterSpacing: "0.18em" }}>{refFor(detailRecord)}</div>
+                <h2 className="text-2xl font-bold mt-2" style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>Détails du dossier</h2>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>Consultation des informations enregistrées et des pièces jointes.</div>
+              </div>
+              <button type="button" onClick={closeDetail} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 8 }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+                <div className="text-xs font-bold uppercase mb-2" style={{ color: C.inkSoft }}>Contact</div>
+                <div className="text-sm font-semibold" style={{ color: C.navy900 }}>{detailRecord.name || "—"}</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}>{detailRecord.org || "—"}</div>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>{detailRecord.email || "—"}</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}>{detailRecord.phone || "—"}</div>
+              </div>
+              <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+                <div className="text-xs font-bold uppercase mb-2" style={{ color: C.inkSoft }}>Statut</div>
+                <StatusBadge status={detailRecord.status} />
+                <div className="text-xs mt-3" style={{ color: C.inkSoft }}><strong>Sujet :</strong> {detailRecord.subject || "—"}</div>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}><strong>Type :</strong> {detailRecord.clientType}</div>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}><strong>Référence :</strong> {detailRecord.attachment || "—"}</div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+                <div className="text-xs font-bold uppercase mb-2" style={{ color: C.inkSoft }}>Dates</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}><strong>Reçu le :</strong> {formatDisplayDate(detailRecord.receivedAt).date} {formatDisplayDate(detailRecord.receivedAt).time}</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}><strong>Traitement avant :</strong> {computeDeadline(detailRecord).toLocaleDateString("fr-FR")}</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}><strong>Clôture :</strong> {detailRecord.treatedAt ? formatDisplayDate(detailRecord.treatedAt).date : "—"}</div>
+              </div>
+              <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+                <div className="text-xs font-bold uppercase mb-2" style={{ color: C.inkSoft }}>Détails supplémentaires</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}><strong>Délai :</strong> {detailRecord.delayDays} jours</div>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}><strong>Notes :</strong></div>
+                <div className="text-sm" style={{ color: C.inkSoft, whiteSpace: "pre-wrap" }}>{detailRecord.notes || "Aucune note."}</div>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <div className="text-xs font-bold uppercase mb-3" style={{ color: C.navy800, letterSpacing: "0.05em" }}>Pièces jointes</div>
+              {detailRecord.attachments?.length ? (
+                <div className="space-y-2">
+                  {detailRecord.attachments.map(att => (
+                    <div key={att.id} className="flex items-center justify-between rounded-md px-3 py-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+                      <div>
+                        <div className="font-semibold text-sm" style={{ color: C.navy900 }}>{att.filename}</div>
+                        <div className="text-[11px]" style={{ color: C.inkSoft }}>{formatBytes(att.size)}</div>
+                      </div>
+                      <button type="button" onClick={() => downloadAttachment(att.id, detailRecord.attachments)} className="px-3 py-2 rounded-md text-xs font-semibold" style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.navy900, cursor: "pointer" }}>
+                        Télécharger
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs" style={{ color: C.inkSoft }}>Aucune pièce jointe enregistrée.</div>
+              )}
+            </div>
+
+            <div>
+              <div className="text-xs font-bold uppercase mb-3" style={{ color: C.navy800, letterSpacing: "0.05em" }}>Historique des échanges</div>
+              {detailRecord.exchanges?.length ? (
+                <div className="space-y-3">
+                  {detailRecord.exchanges.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).map(ex => (
+                    <div key={ex.id} className="rounded-md px-3 py-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+                      <div className="text-[10.5px] font-bold uppercase" style={{ color: C.inkSoft }}>{ex.type} · {new Date(ex.date).toLocaleDateString("fr-FR")}</div>
+                      <div className="text-sm mt-1" style={{ color: C.inkSoft }}>{ex.note}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs" style={{ color: C.inkSoft }}>Aucun échange enregistré.</div>
+              )}
             </div>
           </div>
         </div>
