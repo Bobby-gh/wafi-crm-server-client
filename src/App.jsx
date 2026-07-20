@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import api from "./api";
 import {
   Search, Plus, Paperclip, Download, X, Pencil, Settings2,
   LayoutDashboard, ListChecks, FileText, Trash2
@@ -36,49 +35,33 @@ const MAX_FILE_BYTES = 3.5 * 1024 * 1024;
 
 /* ---------------------------------------------------------------
  * Couche de stockage — parle à l'API du serveur Express/SQLite
- * via l'instance axios `api` (baseURL = VITE_API_URL, withCredentials
- * = true). NE PAS utiliser fetch() directement ici : des chemins
- * relatifs comme "/api/storage/..." se résolvent contre l'origine du
- * front-end (Vercel) et non contre le serveur Express, ce qui donne
- * des 404 qui n'ont rien à voir avec la clé demandée.
+ * (remplace window.storage, propre à l'environnement Claude.ai).
  * --------------------------------------------------------------- */
 const storage = {
   get: async (key) => {
-    try {
-      const { data } = await api.get("/api/storage/" + encodeURIComponent(key));
-      return { key: data.key, value: data.value };
-    } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "/login.html";
-        throw new Error("Session expirée");
-      }
-      if (err.response?.status === 404) throw new Error("not found");
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
-    }
+    const res = await fetch("/api/storage/" + encodeURIComponent(key));
+    if (res.status === 401) { window.location.href = "/login.html"; throw new Error("Session expirée"); }
+    if (res.status === 404) throw new Error("not found");
+    if (!res.ok) throw new Error("Erreur de stockage (" + res.status + ")");
+    const data = await res.json();
+    return { key: data.key, value: data.value };
   },
   set: async (key, value) => {
-    try {
-      const { data } = await api.put("/api/storage/" + encodeURIComponent(key), { value });
-      return { key: data.key, value: data.value };
-    } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "/login.html";
-        throw new Error("Session expirée");
-      }
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
-    }
+    const res = await fetch("/api/storage/" + encodeURIComponent(key), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+    if (res.status === 401) { window.location.href = "/login.html"; throw new Error("Session expirée"); }
+    if (!res.ok) throw new Error("Erreur de stockage (" + res.status + ")");
+    const data = await res.json();
+    return { key: data.key, value: data.value };
   },
   delete: async (key) => {
-    try {
-      await api.delete("/api/storage/" + encodeURIComponent(key));
-      return { key, deleted: true };
-    } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "/login.html";
-        throw new Error("Session expirée");
-      }
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
-    }
+    const res = await fetch("/api/storage/" + encodeURIComponent(key), { method: "DELETE" });
+    if (res.status === 401) { window.location.href = "/login.html"; throw new Error("Session expirée"); }
+    if (!res.ok) throw new Error("Erreur de stockage (" + res.status + ")");
+    return { key, deleted: true };
   },
 };
 
@@ -209,18 +192,16 @@ export default function WafiCRM() {
   useEffect(() => {
     (async () => {
       try {
-        const meRes = await api.get("/api/me");
-        setUsername(meRes.data.username || "");
+        const meRes = await fetch("/api/me");
+        if (meRes.status === 401) { window.location.href = "/login.html"; return; }
+        const me = await meRes.json();
+        setUsername(me.username || "");
 
         const res = await storage.get(STORAGE_KEY);
         const parsed = res && res.value ? JSON.parse(res.value) : null;
         setContacts(parsed?.contacts || []);
         setSettings(parsed?.settings || { defaultDelayDays: 30 });
       } catch (e) {
-        if (e.response?.status === 401 || e.isAxiosError) {
-          window.location.href = "/login.html";
-          return;
-        }
         setContacts([]);
         setSettings({ defaultDelayDays: 30 });
       } finally {
@@ -230,11 +211,8 @@ export default function WafiCRM() {
   }, []);
 
   async function handleLogout() {
-    try {
-      await api.post("/api/logout");
-    } finally {
-      window.location.href = "/login.html";
-    }
+    await fetch("/api/logout", { method: "POST" });
+    window.location.href = "/login.html";
   }
 
   const persist = useCallback(async (nextContacts, nextSettings) => {
