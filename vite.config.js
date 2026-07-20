@@ -6,7 +6,6 @@ import react from "@vitejs/plugin-react";
 //
 // Développement : `npm run dev` (dans /client) lance Vite sur le port 5173
 // et redirige les appels /api/* vers le serveur Express (port 3000, à
-// lancer séparément avec `npm start` à la racine du projet).
 export default defineConfig({
   plugins: [react()],
 });
