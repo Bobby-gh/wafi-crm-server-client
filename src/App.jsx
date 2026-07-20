@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import api, { setAuthToken, clearAuthToken } from "./api";
 import {
-  Search, Plus, Paperclip, Download, X, Pencil, Eye, Settings2,
+  Search, Plus, Paperclip, Download, X, Pencil, Eye, EyeOff, Settings2,
   LayoutDashboard, ListChecks, FileText, Trash2
 } from "lucide-react";
 
