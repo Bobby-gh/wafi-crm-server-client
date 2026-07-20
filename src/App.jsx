@@ -49,7 +49,7 @@ const storage = {
       return { key: data.key, value: data.value };
     } catch (err) {
       if (err.response?.status === 401) {
-        window.location.href = "/login.html";
+        window.location.href = "./login.html";
         throw new Error("Session expirée");
       }
       if (err.response?.status === 404) throw new Error("not found");
@@ -62,7 +62,7 @@ const storage = {
       return { key: data.key, value: data.value };
     } catch (err) {
       if (err.response?.status === 401) {
-        window.location.href = "/login.html";
+        window.location.href = "./login.html";
         throw new Error("Session expirée");
       }
       throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
