@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import api, { setAuthToken, clearAuthToken } from "./api";
 import {
   Search, Plus, Paperclip, Download, X, Pencil, Eye, EyeOff, Settings2,
-  LayoutDashboard, ListChecks, FileText, Trash2, Users, Building2, KeyRound, Shield, Copy
+  LayoutDashboard, ListChecks, FileText, Trash2, Users, Building2, KeyRound, Shield
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -109,7 +109,17 @@ function normalizeUserList(data) {
   return [];
 }
 function isAdminUser(user) {
-  return Boolean(user?.isAdmin || user?.role === "admin" || user?.role === "ADMIN" || user?.admin);
+  const role = (user?.role || user?.userRole || "").toString().toLowerCase();
+  return Boolean(
+    user?.isAdmin ||
+    user?.admin ||
+    user?.is_admin ||
+    user?.isSuperAdmin ||
+    role === "admin" ||
+    role === "administrator" ||
+    role === "superadmin" ||
+    role === "super_admin"
+  );
 }
 function userDisplayName(user) {
   return user?.fullName || user?.name || user?.username || user?.email || "Utilisateur";
@@ -198,6 +208,7 @@ export default function WafiCRM() {
   const [changePasswordLoading, setChangePasswordLoading] = useState(false);
 
   const [appView, setAppView] = useState("registre");
+  const [canManageUsers, setCanManageUsers] = useState(false);
   const [orgUsers, setOrgUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState("");
@@ -219,6 +230,7 @@ export default function WafiCRM() {
     setOrgUsers([]);
     setUsersError("");
     setTemporaryPassword(null);
+    setCanManageUsers(false);
     setAppView("registre");
   }
 
@@ -248,16 +260,24 @@ export default function WafiCRM() {
     setAppView("registre");
   }
 
-  async function loadUsers() {
-    if (!isAdminUser(currentUser)) return;
+  async function loadUsers(allowProbe = false, userOverride = null) {
+    const candidateUser = userOverride || currentUser;
+    if (!allowProbe && !isAdminUser(candidateUser) && !canManageUsers) return;
     setUsersLoading(true);
     setUsersError("");
     try {
       const { data } = await api.get("/api/users");
+      setCanManageUsers(true);
       setOrgUsers(normalizeUserList(data));
     } catch (e) {
       if (e.response?.status === 401) {
         resetSession();
+        return;
+      }
+      if (e.response?.status === 403) {
+        setCanManageUsers(false);
+        if (allowProbe) return;
+        setUsersError("Accès refusé : seuls les administrateurs peuvent gérer les utilisateurs.");
         return;
       }
       setUsersError("Impossible de charger les utilisateurs de l'organisation.");
@@ -271,9 +291,7 @@ export default function WafiCRM() {
     applyUserSession(data, data?.username || localStorage.getItem("wafi_username") || "");
     if (!data?.mustChangePassword) {
       await loadStoredData();
-      if (isAdminUser(data)) {
-        await loadUsers();
-      }
+      await loadUsers(true, data);
     }
   }
 
@@ -341,9 +359,7 @@ export default function WafiCRM() {
       }
 
       await loadStoredData();
-      if (isAdminUser(nextUser)) {
-        await loadUsers();
-      }
+      await loadUsers(true, nextUser);
     } catch (e) {
       if (e.response?.status === 401) {
         setAuthError("Identifiants invalides.");
@@ -385,7 +401,7 @@ export default function WafiCRM() {
       setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
       await loadStoredData();
       if (isAdminUser(currentUser || data?.user)) {
-        await loadUsers();
+        await loadUsers(true, currentUser || data?.user);
       }
     } catch (e) {
       if (e.response?.status === 401) {
@@ -425,6 +441,7 @@ export default function WafiCRM() {
       if (e.response?.status === 401) {
         resetSession();
       } else if (e.response?.status === 403) {
+        setCanManageUsers(false);
         setUsersError("Accès refusé : seuls les administrateurs peuvent gérer les utilisateurs.");
       } else {
         setUsersError("Impossible de créer l'utilisateur pour le moment.");
@@ -657,7 +674,7 @@ export default function WafiCRM() {
 
   const totalCount = contacts.length;
   const openCount = contacts.filter(c => c.status === "En cours" || c.status === "Nouveau").length;
-  const userIsAdmin = isAdminUser(currentUser);
+  const userIsAdmin = isAdminUser(currentUser) || canManageUsers;
   const organizationLabel = organizationName || normalizeOrganizationName(currentUser, "");
   const displayedView = userIsAdmin ? appView : (appView === "users" ? "registre" : appView);
 
@@ -873,6 +890,16 @@ export default function WafiCRM() {
             style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.navy900, cursor: "pointer" }}
           >
             Déconnexion
+          </button>
+          <button
+            onClick={() => {
+              setAppView("registre");
+              openNew();
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold"
+            style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer" }}
+          >
+            <Plus size={13} /> Nouvelle demande
           </button>
         </div>
 
