@@ -2,7 +2,7 @@ import axios from "axios";
 
 const runtimeApiUrl = typeof window !== "undefined" && window.__VITE_API_URL__;
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || runtimeApiUrl || "/",
+  baseURL: import.meta.env.VITE_API_URL || runtimeApiUrl || "https://crm-server-side-production-e839.up.railway.app/",
   withCredentials: true,
 });
 
