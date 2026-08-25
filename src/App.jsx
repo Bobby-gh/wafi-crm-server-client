@@ -566,9 +566,7 @@ export default function WafiCRM() {
     try {
       link.click();
     } finally {
-      if (link.parentNode) {
-        link.parentNode.removeChild(link);
-      }
+      link.remove?.();
     }
   }
 
