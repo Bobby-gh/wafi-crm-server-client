@@ -34,6 +34,28 @@ const C = {
 const STORAGE_KEY = "wafi-crm-data";
 const MAX_FILE_BYTES = 3.5 * 1024 * 1024;
 
+function toLocalInputValue(date) {
+  const value = new Date(date);
+  if (Number.isNaN(value.getTime())) return "";
+  const offset = value.getTimezoneOffset() * 60000;
+  return new Date(value.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function toDateInputValue(date) {
+  const value = new Date(date);
+  if (Number.isNaN(value.getTime())) return "";
+  return toLocalInputValue(value).slice(0, 10);
+}
+
+function formatDisplayDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { date: "-", time: "-" };
+  return {
+    date: date.toLocaleDateString("fr-FR"),
+    time: date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+  };
+}
+
 /* ---------------------------------------------------------------
  * Couche de stockage — parle à l'API du serveur Express/SQLite
  * via l'instance axios `api` (baseURL = VITE_API_URL, withCredentials
