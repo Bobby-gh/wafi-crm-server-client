@@ -187,6 +187,7 @@ export default function WafiCRM() {
   const [removedAttachmentIds, setRemovedAttachmentIds] = useState([]);
   const [exDraft, setExDraft] = useState({ date: "", type: "Email", note: "" });
   const [uploadWarning, setUploadWarning] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -471,9 +472,10 @@ export default function WafiCRM() {
     } catch (e) {
       if (e.response?.status === 401) {
         resetSession();
-        return;
+        throw e;
       }
       console.error("Erreur d'enregistrement", e);
+      throw e;
     }
   }, []);
 
@@ -490,6 +492,7 @@ export default function WafiCRM() {
     setRemovedAttachmentIds([]);
     setExDraft({ date: toDateInputValue(new Date()), type: "Email", note: "" });
     setUploadWarning("");
+    setSaveError("");
     setModalOpen(true);
   }
   function openEdit(c) {
@@ -506,6 +509,7 @@ export default function WafiCRM() {
     setRemovedAttachmentIds([]);
     setExDraft({ date: toDateInputValue(new Date()), type: "Email", note: "" });
     setUploadWarning("");
+    setSaveError("");
     setModalOpen(true);
   }
   function closeModal() {
@@ -591,39 +595,54 @@ export default function WafiCRM() {
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
-    for (const id of removedAttachmentIds) {
-      try { await storage.delete("wafi-crm-file:" + id); } catch (e) {}
-    }
-    for (const att of attachments) {
-      if (att.isNew) {
-        try { await storage.set("wafi-crm-file:" + att.id, att.dataUrl); } catch (e) {
-          alert(`Le document « ${att.filename} » n'a pas pu être enregistré.`);
+    setSaveError("");
+    try {
+      const receivedAt = new Date(form.receivedAt);
+      if (Number.isNaN(receivedAt.getTime())) {
+        setSaveError("La date de réception est invalide.");
+        return;
+      }
+
+      for (const id of removedAttachmentIds) {
+        await storage.delete("wafi-crm-file:" + id);
+      }
+      for (const att of attachments) {
+        if (att.isNew) {
+          await storage.set("wafi-crm-file:" + att.id, att.dataUrl);
         }
       }
+
+      const attachmentsMeta = attachments.map(a => ({
+        id: a.id, filename: a.filename, size: a.size, uploadedAt: a.uploadedAt || new Date().toISOString(),
+      }));
+      const payload = {
+        clientType: form.clientType, org: form.org.trim(), name: form.name.trim(),
+        email: form.email.trim(), phone: form.phone.trim(), attachment: form.attachment.trim(),
+        attachments: attachmentsMeta, subject: form.subject.trim(),
+        receivedAt: receivedAt.toISOString(),
+        delayDays: Number(form.delayDays) || settings.defaultDelayDays,
+        status: form.status,
+        treatedAt: form.treatedAt ? new Date(form.treatedAt).toISOString() : null,
+        notes: form.notes.trim(), exchanges,
+      };
+      let next;
+      if (editingId) {
+        next = contacts.map(c => (c.id === editingId ? { ...c, ...payload } : c));
+      } else {
+        next = [...contacts, { id: newId("c"), seq: nextSeq(), ...payload }];
+      }
+      await persist(next, settings);
+      setContacts(next);
+      closeModal();
+    } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+      } else {
+        setSaveError("La demande n'a pas pu être enregistrée. Vérifiez la connexion au serveur et réessayez.");
+      }
+    } finally {
+      setSaving(false);
     }
-    const attachmentsMeta = attachments.map(a => ({
-      id: a.id, filename: a.filename, size: a.size, uploadedAt: a.uploadedAt || new Date().toISOString(),
-    }));
-    const payload = {
-      clientType: form.clientType, org: form.org.trim(), name: form.name.trim(),
-      email: form.email.trim(), phone: form.phone.trim(), attachment: form.attachment.trim(),
-      attachments: attachmentsMeta, subject: form.subject.trim(),
-      receivedAt: new Date(form.receivedAt).toISOString(),
-      delayDays: Number(form.delayDays) || settings.defaultDelayDays,
-      status: form.status,
-      treatedAt: form.treatedAt ? new Date(form.treatedAt).toISOString() : null,
-      notes: form.notes.trim(), exchanges,
-    };
-    let next;
-    if (editingId) {
-      next = contacts.map(c => (c.id === editingId ? { ...c, ...payload } : c));
-    } else {
-      next = [...contacts, { id: newId("c"), seq: nextSeq(), ...payload }];
-    }
-    setContacts(next);
-    await persist(next, settings);
-    setSaving(false);
-    closeModal();
   }
   async function handleDelete() {
     if (!editingId) return;
@@ -1327,6 +1346,8 @@ export default function WafiCRM() {
                 </button>
               </div>
             </div>
+
+            {saveError && <div className="text-sm mt-4" role="alert" style={{ color: C.red }}>{saveError}</div>}
 
             <div className="flex justify-end gap-2.5 mt-6">
               {editingId && (
