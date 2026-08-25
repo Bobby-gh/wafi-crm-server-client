@@ -92,6 +92,32 @@ const EMPTY_FORM = {
   treatedAt: "",
   notes: "",
 };
+function normalizeOrganizationName(user, fallback = "") {
+  return (
+    user?.organizationName ||
+    user?.organization?.name ||
+    user?.organization?.organizationName ||
+    user?.orgName ||
+    fallback ||
+    ""
+  );
+}
+function normalizeUserList(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.users)) return data.users;
+  if (Array.isArray(data?.data)) return data.data;
+  return [];
+}
+function isAdminUser(user) {
+  return Boolean(user?.isAdmin || user?.role === "admin" || user?.role === "ADMIN" || user?.admin);
+}
+function userDisplayName(user) {
+  return user?.fullName || user?.name || user?.username || user?.email || "Utilisateur";
+}
+function roleLabel(user) {
+  if (isAdminUser(user)) return "Administrateur";
+  return user?.role || "Utilisateur";
+}
 /* ---------------- small UI atoms ---------------- */
 function Dot({ color }) {
   const map = { green: C.green, yellow: "#c99a1a", red: "#c1484d" };
