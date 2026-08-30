@@ -25,7 +25,7 @@ export function UsersPage({
   loadUsers,
 }) {
   console.log("[USERS_PAGE] Rendering Users Management Page");
-  console.log("[USERS_PAGE] Total users:', orgUsers.length);
+  console.log("[USERS_PAGE] Total users:', orgUsers.length");
 
   return (
     <>
@@ -40,7 +40,7 @@ export function UsersPage({
                 required
                 value={userForm.username}
                 onChange={(e) => {
-                  console.log("[USERS_PAGE] Username field changed');
+                  console.log("[USERS_PAGE] Username field changed");
                   setUserForm((f) => ({ ...f, username: e.target.value }));
                 }}
                 style={inputStyle}
@@ -160,7 +160,7 @@ export function UsersPage({
               </thead>
               <tbody>
                 {orgUsers.map((user) => {
-                  console.log("[USERS_PAGE] Rendering user row:', user.username || user.email);
+                  console.log("[USERS_PAGE] Rendering user row:', user.username || user.email");
                   return (
                     <tr key={user.id || user.userId || user.username || user.email} style={{ borderBottom: "1px solid #ece8dc" }}>
                       <td className="px-4 py-3.5">
