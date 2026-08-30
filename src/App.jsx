@@ -365,6 +365,7 @@ export default function WafiCRM() {
         : { username: authForm.username.trim(), password: authForm.password };
 
       const { data } = await api.post(endpoint, payload);
+      console.log("Auth response data:", data);
       const nextUser = data.user || {
         username: data.username || payload.username,
         organizationName: data.organizationName || authForm.organizationName,
