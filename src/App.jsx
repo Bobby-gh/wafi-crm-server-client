@@ -365,7 +365,6 @@ export default function WafiCRM() {
         : { username: authForm.username.trim(), password: authForm.password };
 
       const { data } = await api.post(endpoint, payload);
-      console.log("Auth response data:", data);
       const nextUser = data.user || {
         username: data.username || payload.username,
         organizationName: data.organizationName || authForm.organizationName,
@@ -386,6 +385,7 @@ export default function WafiCRM() {
       await loadStoredData();
       await loadUsers(true, nextUser);
     } catch (e) {
+      console.error("Create user error:", e.response?.data || e);
       if (e.response?.status === 401) {
         setAuthError("Identifiants invalides.");
       } else if (e.response?.status === 409) {
