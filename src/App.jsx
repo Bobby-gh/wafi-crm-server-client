@@ -1,18 +1,47 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import api, { setAuthToken, clearAuthToken } from "./api";
 import {
-  Search, Plus, Paperclip, Download, X, Pencil, Eye, EyeOff, Settings2,
-  LayoutDashboard, ListChecks, FileText, Trash2, Users, Building2, KeyRound, Shield
+  LayoutDashboard, ListChecks, Users, Building2, Shield
 } from "lucide-react";
 import "./index.css";
 import "../public/login.html"; // for Vite to copy this file to dist
+
+// ================================================================
+// WAFI CAPITAL CRM - Main Application
+// Modular architecture with separated concerns
+// ================================================================
+
+console.log("[APP] Initializing WAFI CRM Application...");
+
+// Import constants and utilities
+import { C, STORAGE_KEY, MAX_FILE_BYTES, EMPTY_FORM } from "./utils/constants";
+import {
+  toLocalInputValue, toDateInputValue, formatDisplayDate, formatBytes,
+  newId, refFor, complianceColor, computeDeadline,
+  normalizeOrganizationName, normalizeUserList, isAdminUser,
+  userDisplayName, roleLabel
+} from "./utils/helpers";
+
+// Import UI components and widgets
+import {
+  StatusBadge, Field, inputStyle, Dot,
+  RequestModal, SettingsModal, DetailModal
+} from "./components/widgets";
+
+// Import page components
+import { AuthPage, ChangePasswordPage } from "./pages/AuthPage";
+import { RegistrePage } from "./pages/RegistrePage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { UsersPage } from "./pages/UsersPage";
+
+console.log("[APP] All modules imported successfully");
 /* ---------------------------------------------------------------
  * Palette de marque WAFI CAPITAL — appliquée via style inline
  * (les classes Tailwind arbitraires ne sont pas fiables dans cet
  * environnement, donc les couleurs de marque passent par des objets
  * de style pendant que Tailwind gère la mise en page / l'espacement).
  * --------------------------------------------------------------- */
-const C = {
+const C_OLD = {
   navy950: "#0a1830",
   navy900: "#0e2340",
   navy800: "#16325c",
@@ -32,30 +61,24 @@ const C = {
   redBg: "#f5e2e2",
 };
 
-const STORAGE_KEY = "wafi-crm-data";
-const MAX_FILE_BYTES = 3.5 * 1024 * 1024;
+// USE C from constants instead of defining it here
+const STORAGE_KEY_OLD = "wafi-crm-data";
+const MAX_FILE_BYTES_OLD = 3.5 * 1024 * 1024;
 
-function toLocalInputValue(date) {
-  const value = new Date(date);
-  if (Number.isNaN(value.getTime())) return "";
-  const offset = value.getTimezoneOffset() * 60000;
-  return new Date(value.getTime() - offset).toISOString().slice(0, 16);
+function toLocalInputValue_IMPORTED(date) {
+  return toLocalInputValue(date);
 }
 
-function toDateInputValue(date) {
-  const value = new Date(date);
-  if (Number.isNaN(value.getTime())) return "";
-  return toLocalInputValue(value).slice(0, 10);
+function toDateInputValue_IMPORTED(date) {
+  return toDateInputValue(date);
 }
 
-function formatDisplayDate(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return { date: "-", time: "-" };
-  return {
-    date: date.toLocaleDateString("fr-FR"),
-    time: date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
-  };
+function formatDisplayDate_IMPORTED(value) {
+  return formatDisplayDate(value);
 }
+
+// Storage layer - using imported functions
+// Helper functions are now in utils/helpers.js
 
 /* ---------------------------------------------------------------
  * Couche de stockage — parle à l'API du serveur Express/SQLite
@@ -67,37 +90,63 @@ function formatDisplayDate(value) {
  * --------------------------------------------------------------- */
 const storage = {
   get: async (key) => {
+    console.log("[STORAGE] Getting key:", key);
     try {
       const { data } = await api.get("/api/storage/" + encodeURIComponent(key));
+      console.log("[STORAGE] Successfully retrieved key:", key);
       return { key: data.key, value: data.value };
     } catch (err) {
-      if (err.response?.status === 404) return null;
+      if (err.response?.status === 404) {
+        console.log("[STORAGE] Key not found:", key);
+        return null;
+      }
+      console.error("[STORAGE] Error getting key:", key, err);
       throw err;
     }
   },
   set: async (key, value) => {
+    console.log("[STORAGE] Setting key:", key, "with value length:", value?.length || 0);
     try {
       const { data } = await api.put("/api/storage/" + encodeURIComponent(key), { value });
+      console.log("[STORAGE] Successfully set key:", key);
       return { key: data.key, value: data.value };
     } catch (err) {
+      console.error("[STORAGE] Error setting key:", key, err);
       throw err;
     }
   },
   delete: async (key) => {
+    console.log("[STORAGE] Deleting key:", key);
     try {
       await api.delete("/api/storage/" + encodeURIComponent(key));
+      console.log("[STORAGE] Successfully deleted key:", key);
       return { key, deleted: true };
     } catch (err) {
+      console.error("[STORAGE] Error deleting key:", key, err);
       throw err;
     }
   },
   list: async (prefix = "") => {
-    const { data } = await api.get("/api/storage", { params: prefix ? { prefix } : {} });
-    return data;
+    console.log("[STORAGE] Listing keys with prefix:", prefix);
+    try {
+      const { data } = await api.get("/api/storage", { params: prefix ? { prefix } : {} });
+      console.log("[STORAGE] Found", data?.length || 0, "items");
+      return data;
+    } catch (err) {
+      console.error("[STORAGE] Error listing keys:", err);
+      throw err;
+    }
   },
   listKeys: async () => {
-    const { data } = await api.get("/api/storage/keys");
-    return data.keys || [];
+    console.log("[STORAGE] Listing all keys");
+    try {
+      const { data } = await api.get("/api/storage/keys");
+      console.log("[STORAGE] Found", data.keys?.length || 0, "keys");
+      return data.keys || [];
+    } catch (err) {
+      console.error("[STORAGE] Error listing all keys:", err);
+      throw err;
+    }
   },
 };
 
@@ -192,6 +241,8 @@ const inputStyle = {
 };
 
 export default function WafiCRM() {
+  console.log("[APP] Initializing WafiCRM main component");
+  
   const [contacts, setContacts] = useState([]);
   const [settings, setSettings] = useState({ defaultDelayDays: 30 });
   const [loading, setLoading] = useState(true);
@@ -241,6 +292,7 @@ export default function WafiCRM() {
   const [temporaryPassword, setTemporaryPassword] = useState(null);
 
   function resetSession() {
+    console.log("[APP] Resetting session");
     clearAuthToken();
     setCurrentUser(null);
     setUsername("");
@@ -259,21 +311,32 @@ export default function WafiCRM() {
   }
 
   async function loadStoredData() {
+    console.log("[APP] Loading stored data");
     try {
-      const res = await storage.get(STORAGE_KEY);
-      const parsed = res?.value ? JSON.parse(res.value) : null;
-      setContacts(parsed?.contacts || []);
-      setSettings(parsed?.settings || { defaultDelayDays: 30 });
-    } catch (e) {
-      if (e.response?.status === 401) {
-        resetSession();
-        return;
-      }
-      setContacts([]);
-      setSettings({ defaultDelayDays: 30 });
-    }
-  }
+  const res = await storage.get(STORAGE_KEY);
 
+  const parsed = res?.value ? JSON.parse(res.value) : null;
+
+  console.log(
+    "[APP] Stored data loaded - contacts:",
+    parsed?.contacts?.length || 0
+  );
+
+  setContacts(parsed?.contacts || []);
+  setSettings(parsed?.settings || { defaultDelayDays: 30 });
+
+      } catch (e) {
+        if (e.response?.status === 401) {
+          console.warn("[APP] Unauthorized when loading stored data");
+          resetSession();
+          return;
+        }
+
+        console.error("[APP] Error loading stored data:", e);
+
+        setContacts([]);
+        setSettings({ defaultDelayDays: 30 });
+      }
   function applyUserSession(user, fallbackUsername = "") {
     const nextUsername = user?.username || fallbackUsername || localStorage.getItem("wafi_username") || "";
     setCurrentUser(user || null);
@@ -1298,7 +1361,7 @@ export default function WafiCRM() {
             </div>
 
             {/* Attachments */}
-            <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.line}` }}>
+            {/* <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.line}` }}>
               <div className="text-xs font-bold uppercase mb-2.5 flex items-center gap-1.5" style={{ color: C.navy800, letterSpacing: "0.05em" }}>
                 <Paperclip size={13} /> Pièces jointes (PDF)
               </div>
@@ -1329,7 +1392,7 @@ export default function WafiCRM() {
               <div className="text-[11px] mt-1" style={{ color: uploadWarning ? C.red : C.inkSoft }}>
                 {uploadWarning || "Fichiers PDF, 3,5 Mo maximum chacun."}
               </div>
-            </div>
+            </div> */}
 
             {/* Exchange history */}
             <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.line}` }}>
@@ -1498,4 +1561,4 @@ export default function WafiCRM() {
       )}
     </div>
   );
-}
+}}
