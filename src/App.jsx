@@ -6,6 +6,7 @@ import {
   Users,
   Building2,
   Shield,
+  Plus,
 } from "lucide-react";
 import "./index.css";
 import "../public/login.html"; // for Vite to copy this file to dist
