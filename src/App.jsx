@@ -4,7 +4,8 @@ import {
   Search, Plus, Paperclip, Download, X, Pencil, Settings2,
   LayoutDashboard, ListChecks, FileText, Trash2
 } from "lucide-react";
-
+import "./index.css";
+import "../public/login.html"; // for Vite to copy this file to dist
 /* ---------------------------------------------------------------
  * Palette de marque WAFI CAPITAL — appliquée via style inline
  * (les classes Tailwind arbitraires ne sont pas fiables dans cet
