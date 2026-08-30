@@ -18,9 +18,9 @@ export function DashboardPage({
   refFor,
 }) {
   console.log("[DASHBOARD_PAGE] Rendering Dashboard Page");
-  console.log("[DASHBOARD_PAGE] Green (on time):', green.length);
-  console.log("[DASHBOARD_PAGE] Yellow (approaching):', yellow.length);
-  console.log("[DASHBOARD_PAGE] Red (overdue):', red.length);
+  console.log("[DASHBOARD_PAGE] Green (on time):", green.length);
+  console.log("[DASHBOARD_PAGE] Yellow (approaching):", yellow.length);
+  console.log("[DASHBOARD_PAGE] Red (overdue):", red.length);
 
   return (
     <>
@@ -45,7 +45,7 @@ export function DashboardPage({
             color: "#c1484d",
           },
         ].map((k) => {
-          console.log("[DASHBOARD_PAGE] Rendering stat card:', k.label, 'count:', k.n);
+          console.log("[DASHBOARD_PAGE] Rendering stat card:", k.label, "count:", k.n);
           return (
             <div key={k.label} className="relative overflow-hidden rounded-xl px-5 py-4.5" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
               <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 5, background: k.color }} />
@@ -76,7 +76,7 @@ export function DashboardPage({
           <tbody>
             {dashboardSorted.map(({ c, color, deadline }) => {
               const { date } = formatDisplayDate(c.receivedAt);
-              console.log("[DASHBOARD_PAGE] Rendering dashboard row for contact:', c.id, 'color:', color);
+              console.log("[DASHBOARD_PAGE] Rendering dashboard row for contact:", c.id, "color:", color);
               return (
                 <tr key={c.id} style={{ borderBottom: "1px solid #ece8dc" }}>
                   <td className="px-4 py-3.5">
