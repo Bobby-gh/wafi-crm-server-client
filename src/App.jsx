@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import api from "./api";
+import api, { setAuthToken, clearAuthToken } from "./api";
 import {
-  Search, Plus, Paperclip, Download, X, Pencil, Settings2,
-  LayoutDashboard, ListChecks, FileText, Trash2
+  Search, Plus, Paperclip, Download, X, Pencil, Eye, EyeOff, Settings2,
+  LayoutDashboard, ListChecks, FileText, Trash2, Users, Building2, KeyRound, Shield
 } from "lucide-react";
 import "./index.css";
 import "../public/login.html"; // for Vite to copy this file to dist
@@ -35,6 +35,28 @@ const C = {
 const STORAGE_KEY = "wafi-crm-data";
 const MAX_FILE_BYTES = 3.5 * 1024 * 1024;
 
+function toLocalInputValue(date) {
+  const value = new Date(date);
+  if (Number.isNaN(value.getTime())) return "";
+  const offset = value.getTimezoneOffset() * 60000;
+  return new Date(value.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function toDateInputValue(date) {
+  const value = new Date(date);
+  if (Number.isNaN(value.getTime())) return "";
+  return toLocalInputValue(value).slice(0, 10);
+}
+
+function formatDisplayDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { date: "-", time: "-" };
+  return {
+    date: date.toLocaleDateString("fr-FR"),
+    time: date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+  };
+}
+
 /* ---------------------------------------------------------------
  * Couche de stockage — parle à l'API du serveur Express/SQLite
  * via l'instance axios `api` (baseURL = VITE_API_URL, withCredentials
@@ -49,12 +71,8 @@ const storage = {
       const { data } = await api.get("/api/storage/" + encodeURIComponent(key));
       return { key: data.key, value: data.value };
     } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "/login.html";
-        throw new Error("Session expirée");
-      }
-      if (err.response?.status === 404) throw new Error("not found");
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
+      if (err.response?.status === 404) return null;
+      throw err;
     }
   },
   set: async (key, value) => {
@@ -62,11 +80,7 @@ const storage = {
       const { data } = await api.put("/api/storage/" + encodeURIComponent(key), { value });
       return { key: data.key, value: data.value };
     } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "./login.html";
-        throw new Error("Session expirée");
-      }
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
+      throw err;
     }
   },
   delete: async (key) => {
@@ -74,12 +88,16 @@ const storage = {
       await api.delete("/api/storage/" + encodeURIComponent(key));
       return { key, deleted: true };
     } catch (err) {
-      if (err.response?.status === 401) {
-        window.location.href = "/login.html";
-        throw new Error("Session expirée");
-      }
-      throw new Error("Erreur de stockage (" + (err.response?.status ?? "réseau") + ")");
+      throw err;
     }
+  },
+  list: async (prefix = "") => {
+    const { data } = await api.get("/api/storage", { params: prefix ? { prefix } : {} });
+    return data;
+  },
+  listKeys: async () => {
+    const { data } = await api.get("/api/storage/keys");
+    return data.keys || [];
   },
 };
 
@@ -97,49 +115,42 @@ const EMPTY_FORM = {
   treatedAt: "",
   notes: "",
 };
-
-/* ---------------- helpers ---------------- */
-function pad(n) { return n.toString().padStart(2, "0"); }
-function toLocalInputValue(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+function normalizeOrganizationName(user, fallback = "") {
+  return (
+    user?.organizationName ||
+    user?.organization?.name ||
+    user?.organization?.organizationName ||
+    user?.orgName ||
+    fallback ||
+    ""
+  );
 }
-function toDateInputValue(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+function normalizeUserList(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.users)) return data.users;
+  if (Array.isArray(data?.data)) return data.data;
+  return [];
 }
-function formatDisplayDate(iso) {
-  const d = new Date(iso);
-  if (isNaN(d)) return { date: "—", time: "" };
-  return {
-    date: d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }),
-    time: d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
-  };
+function isAdminUser(user) {
+  const role = (user?.role || user?.userRole || "").toString().toLowerCase();
+  return Boolean(
+    user?.isAdmin ||
+    user?.admin ||
+    user?.is_admin ||
+    user?.isSuperAdmin ||
+    role === "admin" ||
+    role === "administrator" ||
+    role === "superadmin" ||
+    role === "super_admin"
+  );
 }
-function refFor(c) {
-  const y = new Date(c.receivedAt).getFullYear() || new Date().getFullYear();
-  return `WAFI-${y}-${c.seq.toString().padStart(4, "0")}`;
+function userDisplayName(user) {
+  return user?.fullName || user?.name || user?.username || user?.email || "Utilisateur";
 }
-function computeDeadline(c) {
-  const d = new Date(c.receivedAt);
-  d.setDate(d.getDate() + (Number(c.delayDays) || 0));
-  return d;
+function roleLabel(user) {
+  if (isAdminUser(user)) return "Administrateur";
+  return user?.role || "Utilisateur";
 }
-function complianceColor(c) {
-  const deadline = computeDeadline(c);
-  if (c.status === "Traité") {
-    if (!c.treatedAt) return "green";
-    return new Date(c.treatedAt) <= deadline ? "green" : "red";
-  }
-  return new Date() <= deadline ? "yellow" : "red";
-}
-function formatBytes(bytes) {
-  if (bytes < 1024) return bytes + " o";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " Ko";
-  return (bytes / (1024 * 1024)).toFixed(1) + " Mo";
-}
-function newId(prefix) {
-  return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
-}
-
 /* ---------------- small UI atoms ---------------- */
 function Dot({ color }) {
   const map = { green: C.green, yellow: "#c99a1a", red: "#c1484d" };
@@ -192,49 +203,286 @@ export default function WafiCRM() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [detailRecord, setDetailRecord] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [exchanges, setExchanges] = useState([]);
   const [attachments, setAttachments] = useState([]);
   const [removedAttachmentIds, setRemovedAttachmentIds] = useState([]);
   const [exDraft, setExDraft] = useState({ date: "", type: "Email", note: "" });
   const [uploadWarning, setUploadWarning] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [defaultDelayDraft, setDefaultDelayDraft] = useState(30);
 
+  const [authMode, setAuthMode] = useState("setup");
+  const [currentUser, setCurrentUser] = useState(null);
   const [username, setUsername] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [organizationName, setOrganizationName] = useState("");
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [authForm, setAuthForm] = useState({ username: "", password: "", email: "", organizationName: "" });
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [changePasswordForm, setChangePasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [changePasswordError, setChangePasswordError] = useState("");
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+
+  const [appView, setAppView] = useState("registre");
+  const [canManageUsers, setCanManageUsers] = useState(false);
+  const [orgUsers, setOrgUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [userForm, setUserForm] = useState({ username: "", email: "", fullName: "" });
+  const [userCreateLoading, setUserCreateLoading] = useState(false);
+  const [temporaryPassword, setTemporaryPassword] = useState(null);
+
+  function resetSession() {
+    clearAuthToken();
+    setCurrentUser(null);
+    setUsername("");
+    setIsAuthenticated(false);
+    setOrganizationName("");
+    setMustChangePassword(false);
+    setContacts([]);
+    setSettings({ defaultDelayDays: 30 });
+    setAuthError("");
+    setChangePasswordError("");
+    setOrgUsers([]);
+    setUsersError("");
+    setTemporaryPassword(null);
+    setCanManageUsers(false);
+    setAppView("registre");
+  }
+
+  async function loadStoredData() {
+    try {
+      const res = await storage.get(STORAGE_KEY);
+      const parsed = res?.value ? JSON.parse(res.value) : null;
+      setContacts(parsed?.contacts || []);
+      setSettings(parsed?.settings || { defaultDelayDays: 30 });
+    } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+        return;
+      }
+      setContacts([]);
+      setSettings({ defaultDelayDays: 30 });
+    }
+  }
+
+  function applyUserSession(user, fallbackUsername = "") {
+    const nextUsername = user?.username || fallbackUsername || localStorage.getItem("wafi_username") || "";
+    setCurrentUser(user || null);
+    setUsername(nextUsername);
+    setOrganizationName(normalizeOrganizationName(user, organizationName || ""));
+    setIsAuthenticated(true);
+    setMustChangePassword(Boolean(user?.mustChangePassword));
+    setAppView("registre");
+  }
+
+  async function loadUsers(allowProbe = false, userOverride = null) {
+    const candidateUser = userOverride || currentUser;
+    if (!allowProbe && !isAdminUser(candidateUser) && !canManageUsers) return;
+    setUsersLoading(true);
+    setUsersError("");
+    try {
+      const { data } = await api.get("/api/users");
+      setCanManageUsers(true);
+      setOrgUsers(normalizeUserList(data));
+    } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+        return;
+      }
+      if (e.response?.status === 403) {
+        setCanManageUsers(false);
+        if (allowProbe) return;
+        setUsersError("Accès refusé : seuls les administrateurs peuvent gérer les utilisateurs.");
+        return;
+      }
+      setUsersError("Impossible de charger les utilisateurs de l'organisation.");
+    } finally {
+      setUsersLoading(false);
+    }
+  }
+
+  async function loadCurrentUser() {
+    const { data } = await api.get("/api/me");
+    applyUserSession(data, data?.username || localStorage.getItem("wafi_username") || "");
+    if (!data?.mustChangePassword) {
+      await loadStoredData();
+      await loadUsers(true, data);
+    }
+  }
 
   /* ---------------- auth + load / save ---------------- */
   useEffect(() => {
     (async () => {
       try {
-        const meRes = await api.get("/api/me");
-        setUsername(meRes.data.username || "");
-
-        const res = await storage.get(STORAGE_KEY);
-        const parsed = res && res.value ? JSON.parse(res.value) : null;
-        setContacts(parsed?.contacts || []);
-        setSettings(parsed?.settings || { defaultDelayDays: 30 });
-      } catch (e) {
-        if (e.response?.status === 401 || e.isAxiosError) {
-          window.location.href = "/login.html";
+        const token = localStorage.getItem("wafi_token");
+        if (!token) {
+          setIsAuthenticated(false);
+          setAuthMode("setup");
+          setLoading(false);
           return;
         }
-        setContacts([]);
-        setSettings({ defaultDelayDays: 30 });
+
+        await loadCurrentUser();
+      } catch (e) {
+        if (e.response?.status === 401) {
+          resetSession();
+        } else {
+          setIsAuthenticated(false);
+          setContacts([]);
+          setSettings({ defaultDelayDays: 30 });
+        }
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
+  async function handleAuthSubmit(e) {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError("");
+
+    try {
+      const endpoint = authMode === "setup" ? "/api/signup" : "/api/login";
+      const payload = authMode === "setup"
+        ? {
+          username: authForm.username.trim(),
+          password: authForm.password,
+          email: authForm.email.trim(),
+          organizationName: authForm.organizationName.trim(),
+          organization: authForm.organizationName.trim(),
+          companyName: authForm.organizationName.trim(),
+        }
+        : { username: authForm.username.trim(), password: authForm.password };
+
+      const { data } = await api.post(endpoint, payload);
+      const nextUser = data.user || {
+        username: data.username || payload.username,
+        organizationName: data.organizationName || authForm.organizationName,
+        mustChangePassword: data.mustChangePassword,
+      };
+      const nextUsername = nextUser.username || payload.username;
+      setAuthToken(data.token, nextUsername);
+      applyUserSession(nextUser, nextUsername);
+
+      if (data.mustChangePassword) {
+        setMustChangePassword(true);
+        setChangePasswordForm({ currentPassword: authForm.password, newPassword: "", confirmPassword: "" });
+        setAppView("registre");
+        setLoading(false);
+        return;
+      }
+
+      await loadStoredData();
+      await loadUsers(true, nextUser);
+    } catch (e) {
+      if (e.response?.status === 401) {
+        setAuthError("Identifiants invalides.");
+      } else if (e.response?.status === 409) {
+        setAuthError("Ce nom d'utilisateur existe déjà.");
+      } else if (e.response?.status === 400) {
+        setAuthError("Vérifiez les informations saisies.");
+      } else {
+        setAuthError("Connexion impossible pour le moment.");
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleChangePasswordSubmit(e) {
+    e.preventDefault();
+    setChangePasswordLoading(true);
+    setChangePasswordError("");
+
+    if (changePasswordForm.newPassword !== changePasswordForm.confirmPassword) {
+      setChangePasswordError("Les nouveaux mots de passe ne correspondent pas.");
+      setChangePasswordLoading(false);
+      return;
+    }
+
+    try {
+      const { data } = await api.post("/api/auth/change-password", {
+        currentPassword: changePasswordForm.currentPassword,
+        oldPassword: changePasswordForm.currentPassword,
+        password: changePasswordForm.newPassword,
+        newPassword: changePasswordForm.newPassword,
+      });
+      if (data?.token) {
+        setAuthToken(data.token, username);
+      }
+      await loadCurrentUser();
+      setMustChangePassword(false);
+      setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      await loadStoredData();
+      if (isAdminUser(currentUser || data?.user)) {
+        await loadUsers(true, currentUser || data?.user);
+      }
+    } catch (e) {
+      if (e.response?.status === 401) {
+        setChangePasswordError("Mot de passe actuel invalide.");
+      } else if (e.response?.status === 400) {
+        setChangePasswordError("Impossible de changer le mot de passe.");
+      } else {
+        setChangePasswordError("Le changement de mot de passe a échoué.");
+      }
+    } finally {
+      setChangePasswordLoading(false);
+    }
+  }
+
+  async function handleCreateUser(e) {
+    e.preventDefault();
+    setUserCreateLoading(true);
+    setUsersError("");
+    setTemporaryPassword(null);
+
+    try {
+      const { data } = await api.post("/api/users", {
+        username: userForm.username.trim(),
+        email: userForm.email.trim(),
+        fullName: userForm.fullName.trim(),
+        name: userForm.fullName.trim(),
+      });
+      if (data?.temporaryPassword) {
+        setTemporaryPassword({
+          username: data.username || userForm.username.trim(),
+          password: data.temporaryPassword,
+        });
+      }
+      setUserForm({ username: "", email: "", fullName: "" });
+      await loadUsers();
+    } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+      } else if (e.response?.status === 403) {
+        setCanManageUsers(false);
+        setUsersError("Accès refusé : seuls les administrateurs peuvent gérer les utilisateurs.");
+      } else {
+        setUsersError("Impossible de créer l'utilisateur pour le moment.");
+      }
+    } finally {
+      setUserCreateLoading(false);
+    }
+  }
+
   async function handleLogout() {
     try {
       await api.post("/api/logout");
+    } catch (e) {
+      console.error("Erreur de déconnexion", e);
     } finally {
-      window.location.href = "/login.html";
+      resetSession();
+      setAuthMode("login");
     }
   }
 
@@ -245,7 +493,12 @@ export default function WafiCRM() {
         JSON.stringify({ contacts: nextContacts, settings: nextSettings })
       );
     } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+        throw e;
+      }
       console.error("Erreur d'enregistrement", e);
+      throw e;
     }
   }, []);
 
@@ -262,6 +515,7 @@ export default function WafiCRM() {
     setRemovedAttachmentIds([]);
     setExDraft({ date: toDateInputValue(new Date()), type: "Email", note: "" });
     setUploadWarning("");
+    setSaveError("");
     setModalOpen(true);
   }
   function openEdit(c) {
@@ -278,11 +532,20 @@ export default function WafiCRM() {
     setRemovedAttachmentIds([]);
     setExDraft({ date: toDateInputValue(new Date()), type: "Email", note: "" });
     setUploadWarning("");
+    setSaveError("");
     setModalOpen(true);
   }
   function closeModal() {
     setModalOpen(false);
     setEditingId(null);
+  }
+
+  function openDetail(record) {
+    setDetailRecord(record);
+  }
+
+  function closeDetail() {
+    setDetailRecord(null);
   }
 
   /* ---------------- exchanges ---------------- */
@@ -326,8 +589,8 @@ export default function WafiCRM() {
     if (att && !att.isNew) setRemovedAttachmentIds(prev => [...prev, id]);
     setAttachments(prev => prev.filter(a => a.id !== id));
   }
-  async function downloadAttachment(id) {
-    const att = attachments.find(a => a.id === id);
+  async function downloadAttachment(id, list = attachments) {
+    const att = (list || attachments).find(a => a.id === id);
     if (!att) return;
     let dataUrl = att.dataUrl;
     if (!dataUrl) {
@@ -344,47 +607,65 @@ export default function WafiCRM() {
     link.href = dataUrl;
     link.download = att.filename;
     document.body.appendChild(link);
-    link.click();
-    link.remove();
+    try {
+      link.click();
+    } finally {
+      link.remove?.();
+    }
   }
 
   /* ---------------- save / delete contact ---------------- */
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
-    for (const id of removedAttachmentIds) {
-      try { await storage.delete("wafi-crm-file:" + id); } catch (e) {}
-    }
-    for (const att of attachments) {
-      if (att.isNew) {
-        try { await storage.set("wafi-crm-file:" + att.id, att.dataUrl); } catch (e) {
-          alert(`Le document « ${att.filename} » n'a pas pu être enregistré.`);
+    setSaveError("");
+    try {
+      const receivedAt = new Date(form.receivedAt);
+      if (Number.isNaN(receivedAt.getTime())) {
+        setSaveError("La date de réception est invalide.");
+        return;
+      }
+
+      for (const id of removedAttachmentIds) {
+        await storage.delete("wafi-crm-file:" + id);
+      }
+      for (const att of attachments) {
+        if (att.isNew) {
+          await storage.set("wafi-crm-file:" + att.id, att.dataUrl);
         }
       }
+
+      const attachmentsMeta = attachments.map(a => ({
+        id: a.id, filename: a.filename, size: a.size, uploadedAt: a.uploadedAt || new Date().toISOString(),
+      }));
+      const payload = {
+        clientType: form.clientType, org: form.org.trim(), name: form.name.trim(),
+        email: form.email.trim(), phone: form.phone.trim(), attachment: form.attachment.trim(),
+        attachments: attachmentsMeta, subject: form.subject.trim(),
+        receivedAt: receivedAt.toISOString(),
+        delayDays: Number(form.delayDays) || settings.defaultDelayDays,
+        status: form.status,
+        treatedAt: form.treatedAt ? new Date(form.treatedAt).toISOString() : null,
+        notes: form.notes.trim(), exchanges,
+      };
+      let next;
+      if (editingId) {
+        next = contacts.map(c => (c.id === editingId ? { ...c, ...payload } : c));
+      } else {
+        next = [...contacts, { id: newId("c"), seq: nextSeq(), ...payload }];
+      }
+      await persist(next, settings);
+      setContacts(next);
+      closeModal();
+    } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+      } else {
+        setSaveError("La demande n'a pas pu être enregistrée. Vérifiez la connexion au serveur et réessayez.");
+      }
+    } finally {
+      setSaving(false);
     }
-    const attachmentsMeta = attachments.map(a => ({
-      id: a.id, filename: a.filename, size: a.size, uploadedAt: a.uploadedAt || new Date().toISOString(),
-    }));
-    const payload = {
-      clientType: form.clientType, org: form.org.trim(), name: form.name.trim(),
-      email: form.email.trim(), phone: form.phone.trim(), attachment: form.attachment.trim(),
-      attachments: attachmentsMeta, subject: form.subject.trim(),
-      receivedAt: new Date(form.receivedAt).toISOString(),
-      delayDays: Number(form.delayDays) || settings.defaultDelayDays,
-      status: form.status,
-      treatedAt: form.treatedAt ? new Date(form.treatedAt).toISOString() : null,
-      notes: form.notes.trim(), exchanges,
-    };
-    let next;
-    if (editingId) {
-      next = contacts.map(c => (c.id === editingId ? { ...c, ...payload } : c));
-    } else {
-      next = [...contacts, { id: newId("c"), seq: nextSeq(), ...payload }];
-    }
-    setContacts(next);
-    await persist(next, settings);
-    setSaving(false);
-    closeModal();
   }
   async function handleDelete() {
     if (!editingId) return;
@@ -435,11 +716,165 @@ export default function WafiCRM() {
 
   const totalCount = contacts.length;
   const openCount = contacts.filter(c => c.status === "En cours" || c.status === "Nouveau").length;
+  const userIsAdmin = isAdminUser(currentUser) || canManageUsers;
+  const organizationLabel = organizationName || normalizeOrganizationName(currentUser, "");
+  const displayedView = userIsAdmin ? appView : (appView === "users" ? "registre" : appView);
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: C.paper, color: C.inkSoft }}>
         Chargement du registre…
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: C.paper, color: C.ink }}>
+        <div className="w-full max-w-md rounded-xl p-7" style={{ background: "#fff", border: `1px solid ${C.line}`, boxShadow: "0 20px 50px rgba(0,0,0,0.15)" }}>
+          <div className="text-center mb-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: C.gold500 }}>WAFI CAPITAL CRM</p>
+            <h1 className="text-2xl font-bold mt-2" style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
+              {authMode === "setup" ? "Première configuration" : "Connexion"}
+            </h1>
+            <p className="text-sm mt-2" style={{ color: C.inkSoft }}>
+              {authMode === "setup"
+                ? "Créez la première organisation et le premier compte administrateur."
+                : "Utilisez votre compte pour synchroniser les données avec l’API backend."}
+            </p>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="space-y-3">
+            <Field label="Nom d'utilisateur">
+              <input
+                required
+                value={authForm.username}
+                onChange={(e) => setAuthForm((f) => ({ ...f, username: e.target.value }))}
+                style={inputStyle}
+                autoComplete="username"
+              />
+            </Field>
+            {authMode === "setup" && (
+              <Field label="Organisation">
+                <input
+                  required
+                  value={authForm.organizationName}
+                  onChange={(e) => setAuthForm((f) => ({ ...f, organizationName: e.target.value }))}
+                  style={inputStyle}
+                  autoComplete="organization"
+                />
+              </Field>
+            )}
+            {authMode === "setup" && (
+              <Field label="Email">
+                <input
+                  required
+                  type="email"
+                  value={authForm.email}
+                  onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
+                  style={inputStyle}
+                  autoComplete="email"
+                />
+              </Field>
+            )}
+            <Field label="Mot de passe">
+              <div style={{ position: "relative" }}>
+                <input
+                  required
+                  type={passwordVisible ? "text" : "password"}
+                  value={authForm.password}
+                  onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
+                  style={{ ...inputStyle, paddingRight: 40 }}
+                  autoComplete={authMode === "setup" ? "new-password" : "current-password"}
+                />
+                <button
+                  type="button"
+                  onClick={() => setPasswordVisible((v) => !v)}
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    right: 10,
+                    transform: "translateY(-50%)",
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    cursor: "pointer",
+                    color: C.inkSoft,
+                  }}
+                  aria-label={passwordVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                >
+                  {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </Field>
+            {authError && <div className="text-sm" style={{ color: C.red }}>{authError}</div>}
+            <button type="submit" disabled={authLoading} className="w-full px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer", opacity: authLoading ? 0.7 : 1 }}>
+              {authLoading ? "Chargement…" : authMode === "setup" ? "Créer l'organisation" : "Se connecter"}
+            </button>
+          </form>
+
+          <div className="text-center text-sm mt-4" style={{ color: C.inkSoft }}>
+            {authMode === "setup" ? "Vous avez déjà un compte ?" : "Première fois ici ?"}
+            <button type="button" onClick={() => { setAuthMode(authMode === "setup" ? "login" : "setup"); setAuthError(""); }} style={{ background: "none", border: "none", color: C.navy800, cursor: "pointer", fontWeight: 700 }}>
+              {authMode === "setup" ? "Se connecter" : "Créer l'organisation"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (mustChangePassword) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: C.paper, color: C.ink }}>
+        <div className="w-full max-w-md rounded-xl p-7" style={{ background: "#fff", border: `1px solid ${C.line}`, boxShadow: "0 20px 50px rgba(0,0,0,0.15)" }}>
+          <div className="text-center mb-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: C.gold500 }}>WAFI CAPITAL CRM</p>
+            <h1 className="text-2xl font-bold mt-2" style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
+              Changer votre mot de passe
+            </h1>
+            <p className="text-sm mt-2" style={{ color: C.inkSoft }}>
+              {username ? `${username}, votre mot de passe temporaire doit être remplacé avant d'utiliser l'application.` : "Votre mot de passe temporaire doit être remplacé avant d'utiliser l'application."}
+            </p>
+          </div>
+
+          <form onSubmit={handleChangePasswordSubmit} className="space-y-3">
+            <Field label="Mot de passe actuel">
+              <input
+                required
+                type={passwordVisible ? "text" : "password"}
+                value={changePasswordForm.currentPassword}
+                onChange={(e) => setChangePasswordForm((f) => ({ ...f, currentPassword: e.target.value }))}
+                style={inputStyle}
+                autoComplete="current-password"
+              />
+            </Field>
+            <Field label="Nouveau mot de passe">
+              <input
+                required
+                type={passwordVisible ? "text" : "password"}
+                value={changePasswordForm.newPassword}
+                onChange={(e) => setChangePasswordForm((f) => ({ ...f, newPassword: e.target.value }))}
+                style={inputStyle}
+                autoComplete="new-password"
+              />
+            </Field>
+            <Field label="Confirmer le nouveau mot de passe">
+              <input
+                required
+                type={passwordVisible ? "text" : "password"}
+                value={changePasswordForm.confirmPassword}
+                onChange={(e) => setChangePasswordForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                style={inputStyle}
+                autoComplete="new-password"
+              />
+            </Field>
+            {changePasswordError && <div className="text-sm" style={{ color: C.red }}>{changePasswordError}</div>}
+            <button type="submit" disabled={changePasswordLoading} className="w-full px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer", opacity: changePasswordLoading ? 0.7 : 1 }}>
+              {changePasswordLoading ? "Mise à jour…" : "Enregistrer le nouveau mot de passe"}
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
@@ -459,10 +894,12 @@ export default function WafiCRM() {
               WAFI CAPITAL S.A. · SICAV — BRVM
             </p>
             <h1 className="text-2xl font-bold m-0" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
-              Registre des Demandes Clientèle
+              {displayedView === "users" ? "Administration des utilisateurs" : "Registre des Demandes Clientèle"}
             </h1>
             <p className="text-sm mt-1.5 max-w-lg" style={{ color: "#c7d0de" }}>
-              Suivi des contacts, du délai de traitement statutaire, et de l'historique des échanges.
+              {displayedView === "users"
+                ? "Gestion des comptes de l'organisation et partage manuel des mots de passe temporaires."
+                : "Suivi des contacts, du délai de traitement statutaire, et de l'historique des échanges."}
             </p>
           </div>
           <div className="flex gap-5 text-right">
@@ -478,17 +915,33 @@ export default function WafiCRM() {
         </div>
 
         <div className="text-xs rounded-lg px-3.5 py-2 mb-4" style={{ background: C.paper2, border: `1px solid ${C.line}`, color: C.inkSoft }}>
-          <b style={{ color: C.navy800 }}>Registre partagé</b> — visible et modifiable par tous les utilisateurs de cet outil.
+          <b style={{ color: C.navy800 }}>Organisation</b> — {organizationLabel || "Organisation active"}
         </div>
 
-        <div className="flex items-center justify-end gap-3 mb-3.5 text-xs" style={{ color: C.inkSoft }}>
+        <div className="flex flex-wrap items-center justify-end gap-3 mb-3.5 text-xs" style={{ color: C.inkSoft }}>
           <span className="font-semibold" style={{ color: C.navy800 }}>Connecté : {username}</span>
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: C.paper2, border: `1px solid ${C.line}`, color: C.navy800 }}>
+            <Building2 size={12} /> {organizationLabel || "Organisation"}
+          </span>
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: C.paper2, border: `1px solid ${C.line}`, color: C.navy800 }}>
+            <Shield size={12} /> {roleLabel(currentUser)}
+          </span>
           <button
             onClick={handleLogout}
             className="px-3 py-1.5 rounded-md text-xs font-semibold"
             style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.navy900, cursor: "pointer" }}
           >
             Déconnexion
+          </button>
+          <button
+            onClick={() => {
+              setAppView("registre");
+              openNew();
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold"
+            style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer" }}
+          >
+            <Plus size={13} /> Nouvelle demande
           </button>
         </div>
 
@@ -497,17 +950,18 @@ export default function WafiCRM() {
           {[
             { id: "registre", label: "Registre", icon: ListChecks },
             { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+            ...(userIsAdmin ? [{ id: "users", label: "Utilisateurs", icon: Users }] : []),
           ].map(t => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => setAppView(t.id)}
               className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold -mb-px"
               style={{
-                color: tab === t.id ? C.navy900 : C.inkSoft,
-                borderBottom: `2px solid ${tab === t.id ? C.gold500 : "transparent"}`,
+                color: displayedView === t.id ? C.navy900 : C.inkSoft,
+                borderBottom: `2px solid ${displayedView === t.id ? C.gold500 : "transparent"}`,
                 background: "none", border: "none", borderBottomWidth: 2,
                 borderBottomStyle: "solid",
-                borderBottomColor: tab === t.id ? C.gold500 : "transparent",
+                borderBottomColor: displayedView === t.id ? C.gold500 : "transparent",
                 cursor: "pointer",
               }}
             >
@@ -516,7 +970,7 @@ export default function WafiCRM() {
           ))}
         </div>
 
-        {tab === "registre" && (
+        {displayedView === "registre" && (
           <>
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <div className="relative flex-1" style={{ minWidth: 220 }}>
@@ -594,9 +1048,14 @@ export default function WafiCRM() {
                           <div className="flex items-center text-xs"><Dot color={color} />{deadline.toLocaleDateString("fr-FR")}</div>
                         </td>
                         <td className="px-4 py-3.5 align-top">
-                          <button onClick={() => openEdit(c)} title="Modifier" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 4 }}>
-                            <Pencil size={15} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => openDetail(c)} title="Voir les détails" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 4 }}>
+                              <Eye size={15} />
+                            </button>
+                            <button onClick={() => openEdit(c)} title="Modifier" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 4 }}>
+                              <Pencil size={15} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -618,7 +1077,7 @@ export default function WafiCRM() {
           </>
         )}
 
-        {tab === "dashboard" && (
+        {displayedView === "dashboard" && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-5">
               {[
@@ -668,6 +1127,106 @@ export default function WafiCRM() {
                   <div className="text-lg" style={{ fontFamily: "Georgia, serif", color: C.navy800 }}>Aucun dossier à afficher</div>
                 </div>
               )}
+            </div>
+          </>
+        )}
+
+        {displayedView === "users" && userIsAdmin && (
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+              <div className="lg:col-span-1 rounded-xl p-5" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+                <div className="flex items-center gap-2 text-sm font-bold mb-3" style={{ color: C.navy900 }}>
+                  <Users size={15} /> Nouvel utilisateur
+                </div>
+                <form onSubmit={handleCreateUser} className="space-y-3">
+                  <Field label="Nom d'utilisateur">
+                    <input required value={userForm.username} onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))} style={inputStyle} autoComplete="off" />
+                  </Field>
+                  <Field label="Email">
+                    <input required type="email" value={userForm.email} onChange={(e) => setUserForm((f) => ({ ...f, email: e.target.value }))} style={inputStyle} autoComplete="email" />
+                  </Field>
+                  <Field label="Nom complet">
+                    <input value={userForm.fullName} onChange={(e) => setUserForm((f) => ({ ...f, fullName: e.target.value }))} style={inputStyle} autoComplete="name" />
+                  </Field>
+                  <div className="text-xs" style={{ color: C.inkSoft }}>
+                    Le mot de passe temporaire sera affiché après création et devra être changé à la première connexion.
+                  </div>
+                  {usersError && <div className="text-sm" style={{ color: C.red }}>{usersError}</div>}
+                  <button type="submit" disabled={userCreateLoading} className="w-full px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer", opacity: userCreateLoading ? 0.7 : 1 }}>
+                    {userCreateLoading ? "Création…" : "Créer l'utilisateur"}
+                  </button>
+                </form>
+
+                {temporaryPassword && (
+                  <div className="mt-4 rounded-lg p-4" style={{ background: C.yellowBg, border: `1px solid ${C.line}` }}>
+                    <div className="flex items-center gap-2 text-sm font-bold" style={{ color: C.yellow }}>
+                      <KeyRound size={15} /> Mot de passe temporaire
+                    </div>
+                    <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
+                      À transmettre manuellement à {temporaryPassword.username}. Ce mot de passe ne doit être partagé qu’une seule fois.
+                    </div>
+                    <div className="mt-3 rounded-md px-3 py-2 text-sm font-mono" style={{ background: "#fff", border: `1px dashed ${C.line}`, color: C.navy900 }}>
+                      {temporaryPassword.password}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="lg:col-span-2 rounded-xl overflow-hidden" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+                <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: C.line }}>
+                  <div>
+                    <div className="text-sm font-bold" style={{ color: C.navy900 }}>Utilisateurs de l'organisation</div>
+                    <div className="text-xs" style={{ color: C.inkSoft }}>Liste limitée à votre organisation courante.</div>
+                  </div>
+                  <button type="button" onClick={loadUsers} className="px-3 py-2 rounded-md text-xs font-semibold" style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.navy900, cursor: "pointer" }}>
+                    Actualiser
+                  </button>
+                </div>
+                {usersLoading ? (
+                  <div className="p-6 text-sm" style={{ color: C.inkSoft }}>Chargement des utilisateurs…</div>
+                ) : orgUsers.length === 0 ? (
+                  <div className="p-6 text-sm" style={{ color: C.inkSoft }}>Aucun utilisateur trouvé pour cette organisation.</div>
+                ) : (
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr style={{ background: C.paper2 }}>
+                        {[
+                          "Utilisateur",
+                          "Rôle",
+                          "Email",
+                          "Métadonnées",
+                        ].map((h) => (
+                          <th key={h} className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase" style={{ color: C.inkSoft, letterSpacing: "0.08em", borderBottom: `1px solid ${C.line}` }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orgUsers.map((user) => (
+                        <tr key={user.id || user.userId || user.username || user.email} style={{ borderBottom: "1px solid #ece8dc" }}>
+                          <td className="px-4 py-3.5">
+                            <div className="font-semibold" style={{ color: C.navy900 }}>{userDisplayName(user)}</div>
+                            <div className="text-xs" style={{ color: C.inkSoft }}>{user.username || "—"}</div>
+                          </td>
+                          <td className="px-4 py-3.5 text-xs">
+                            <span className="inline-block px-2.5 py-1 rounded-full" style={{ background: isAdminUser(user) ? C.greenBg : C.paper2, color: isAdminUser(user) ? C.green : C.inkSoft }}>
+                              {roleLabel(user)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 text-xs" style={{ color: C.inkSoft }}>
+                            {user.email || "—"}
+                          </td>
+                          <td className="px-4 py-3.5 text-xs" style={{ color: C.inkSoft }}>
+                            <div>{user.scope ? `Scope: ${user.scope}` : "—"}</div>
+                            {user.records !== undefined && <div>{`Records: ${Array.isArray(user.records) ? user.records.length : user.records}`}</div>}
+                            {user.userId && <div>{`userId: ${user.userId}`}</div>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {usersError && <div className="px-4 py-3 text-sm" style={{ color: C.red }}>{usersError}</div>}
+              </div>
             </div>
           </>
         )}
@@ -811,6 +1370,8 @@ export default function WafiCRM() {
               </div>
             </div>
 
+            {saveError && <div className="text-sm mt-4" role="alert" style={{ color: C.red }}>{saveError}</div>}
+
             <div className="flex justify-end gap-2.5 mt-6">
               {editingId && (
                 <button type="button" onClick={handleDelete} className="mr-auto px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-1.5" style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.red, cursor: "pointer" }}>
@@ -844,6 +1405,92 @@ export default function WafiCRM() {
               <button onClick={saveSettings} className="px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer" }}>
                 Enregistrer
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailRecord && (
+        <div className="fixed inset-0 z-50 flex" style={{ background: "rgba(10,24,48,0.45)" }} onClick={e => e.target === e.currentTarget && closeDetail()}>
+          <div className="ml-auto w-full max-w-xl h-full overflow-y-auto bg-white p-6 shadow-2xl" style={{ minHeight: "100%" }}>
+            <div className="flex items-start justify-between gap-3 mb-6">
+              <div>
+                <div className="text-[10px] font-bold uppercase" style={{ color: C.gold500, letterSpacing: "0.18em" }}>{refFor(detailRecord)}</div>
+                <h2 className="text-2xl font-bold mt-2" style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>Détails du dossier</h2>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>Consultation des informations enregistrées et des pièces jointes.</div>
+              </div>
+              <button type="button" onClick={closeDetail} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 8 }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+                <div className="text-xs font-bold uppercase mb-2" style={{ color: C.inkSoft }}>Contact</div>
+                <div className="text-sm font-semibold" style={{ color: C.navy900 }}>{detailRecord.name || "—"}</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}>{detailRecord.org || "—"}</div>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>{detailRecord.email || "—"}</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}>{detailRecord.phone || "—"}</div>
+              </div>
+              <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+                <div className="text-xs font-bold uppercase mb-2" style={{ color: C.inkSoft }}>Statut</div>
+                <StatusBadge status={detailRecord.status} />
+                <div className="text-xs mt-3" style={{ color: C.inkSoft }}><strong>Sujet :</strong> {detailRecord.subject || "—"}</div>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}><strong>Type :</strong> {detailRecord.clientType}</div>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}><strong>Référence :</strong> {detailRecord.attachment || "—"}</div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+                <div className="text-xs font-bold uppercase mb-2" style={{ color: C.inkSoft }}>Dates</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}><strong>Reçu le :</strong> {formatDisplayDate(detailRecord.receivedAt).date} {formatDisplayDate(detailRecord.receivedAt).time}</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}><strong>Traitement avant :</strong> {computeDeadline(detailRecord).toLocaleDateString("fr-FR")}</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}><strong>Clôture :</strong> {detailRecord.treatedAt ? formatDisplayDate(detailRecord.treatedAt).date : "—"}</div>
+              </div>
+              <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: 16 }}>
+                <div className="text-xs font-bold uppercase mb-2" style={{ color: C.inkSoft }}>Détails supplémentaires</div>
+                <div className="text-xs" style={{ color: C.inkSoft }}><strong>Délai :</strong> {detailRecord.delayDays} jours</div>
+                <div className="text-xs mt-2" style={{ color: C.inkSoft }}><strong>Notes :</strong></div>
+                <div className="text-sm" style={{ color: C.inkSoft, whiteSpace: "pre-wrap" }}>{detailRecord.notes || "Aucune note."}</div>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <div className="text-xs font-bold uppercase mb-3" style={{ color: C.navy800, letterSpacing: "0.05em" }}>Pièces jointes</div>
+              {detailRecord.attachments?.length ? (
+                <div className="space-y-2">
+                  {detailRecord.attachments.map(att => (
+                    <div key={att.id} className="flex items-center justify-between rounded-md px-3 py-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+                      <div>
+                        <div className="font-semibold text-sm" style={{ color: C.navy900 }}>{att.filename}</div>
+                        <div className="text-[11px]" style={{ color: C.inkSoft }}>{formatBytes(att.size)}</div>
+                      </div>
+                      <button type="button" onClick={() => downloadAttachment(att.id, detailRecord.attachments)} className="px-3 py-2 rounded-md text-xs font-semibold" style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.navy900, cursor: "pointer" }}>
+                        Télécharger
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs" style={{ color: C.inkSoft }}>Aucune pièce jointe enregistrée.</div>
+              )}
+            </div>
+
+            <div>
+              <div className="text-xs font-bold uppercase mb-3" style={{ color: C.navy800, letterSpacing: "0.05em" }}>Historique des échanges</div>
+              {detailRecord.exchanges?.length ? (
+                <div className="space-y-3">
+                  {detailRecord.exchanges.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).map(ex => (
+                    <div key={ex.id} className="rounded-md px-3 py-2" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+                      <div className="text-[10.5px] font-bold uppercase" style={{ color: C.inkSoft }}>{ex.type} · {new Date(ex.date).toLocaleDateString("fr-FR")}</div>
+                      <div className="text-sm mt-1" style={{ color: C.inkSoft }}>{ex.note}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs" style={{ color: C.inkSoft }}>Aucun échange enregistré.</div>
+              )}
             </div>
           </div>
         </div>
