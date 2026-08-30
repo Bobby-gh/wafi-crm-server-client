@@ -333,10 +333,11 @@ export default function WafiCRM() {
         }
 
         console.error("[APP] Error loading stored data:", e);
-
         setContacts([]);
         setSettings({ defaultDelayDays: 30 });
       }
+    }
+
   function applyUserSession(user, fallbackUsername = "") {
     const nextUsername = user?.username || fallbackUsername || localStorage.getItem("wafi_username") || "";
     setCurrentUser(user || null);
@@ -1561,4 +1562,4 @@ export default function WafiCRM() {
       )}
     </div>
   );
-}}
+}
