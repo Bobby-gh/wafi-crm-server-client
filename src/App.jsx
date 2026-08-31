@@ -206,13 +206,14 @@ export default function WafiCRM() {
 
   async function loadCurrentUser() {
     const data = await getCurrentUser();
+    const user = data?.user || null;
     applyUserSession(
-      data,
-      data?.username || localStorage.getItem("wafi_username") || "",
+      user,
+      user?.username || localStorage.getItem("wafi_username") || "",
     );
-    if (!data?.mustChangePassword) {
+    if (!user?.mustChangePassword) {
       await loadApplications();
-      await loadUsers(true, data);
+      await loadUsers(true, user);
     }
   }
 
