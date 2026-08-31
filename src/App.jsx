@@ -383,7 +383,10 @@ export default function WafiCRM() {
 
   async function handleLogout() {
     try {
-      await apiLogout();
+     const response = await apiLogout();
+     console.log("Logout response:", response);
+     //route to login page
+     
     } catch {
       // ok
     } finally {
