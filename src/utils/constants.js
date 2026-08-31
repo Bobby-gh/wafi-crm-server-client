@@ -27,25 +27,52 @@ export const C = {
 };
 
 // Storage and configuration
-export const STORAGE_KEY = "wafi-crm-data";
+export const STORAGE_PREFIX = "application:";
 export const MAX_FILE_BYTES = 3.5 * 1024 * 1024;
+export const DEFAULT_PROCESSING_DAYS = 30;
 
-// Empty form template
+// Status constants (English, matching backend)
+export const STATUS = {
+  NEW: "New",
+  IN_PROGRESS: "In Progress",
+  PROCESSED: "Processed",
+  REJECTED: "Rejected",
+};
+
+// Status labels (French, for UI display)
+export const STATUS_LABELS = {
+  [STATUS.NEW]: "Nouveau",
+  [STATUS.IN_PROGRESS]: "En cours",
+  [STATUS.PROCESSED]: "Traité",
+  [STATUS.REJECTED]: "Rejeté",
+};
+
+// Customer type constants
+export const CUSTOMER_TYPE = {
+  COMPANY: "Company",
+  SOCIETY: "Society",
+};
+
+// Customer type labels (French, for UI display)
+export const CUSTOMER_TYPE_LABELS = {
+  [CUSTOMER_TYPE.COMPANY]: "Société",
+  [CUSTOMER_TYPE.SOCIETY]: "Personne physique",
+};
+
+// Empty form template (matching backend data model)
 export const EMPTY_FORM = {
-  clientType: "Société",
-  org: "",
-  name: "",
+  typeOfCustomer: CUSTOMER_TYPE.COMPANY,
+  companyName: "",
+  contactName: "",
   email: "",
   phone: "",
   attachment: "",
   subject: "",
   receivedAt: "",
-  delayDays: 30,
-  status: "Nouveau",
-  treatedAt: "",
+  processingDays: DEFAULT_PROCESSING_DAYS,
+  status: STATUS.NEW,
+  closingDate: "",
   notes: "",
 };
 
 console.log("[CONSTANTS] Brand colors loaded:", Object.keys(C).length, "colors");
-console.log("[CONSTANTS] Storage key:", STORAGE_KEY);
-console.log("[CONSTANTS] Max file size:", MAX_FILE_BYTES, "bytes");

@@ -4,11 +4,9 @@
 // ================================================================
 
 import React from "react";
-import { C } from "../utils/constants";
+import { C, STATUS } from "../utils/constants";
 import { StatusBadge, Dot } from "../components/widgets";
 import { formatDisplayDate, complianceColor, computeDeadline } from "../utils/helpers";
-
-console.log("[DASHBOARD_PAGE] Initializing Dashboard Page component...");
 
 export function DashboardPage({
   dashboardSorted,
@@ -17,11 +15,6 @@ export function DashboardPage({
   red,
   refFor,
 }) {
-  console.log("[DASHBOARD_PAGE] Rendering Dashboard Page");
-  console.log("[DASHBOARD_PAGE] Green (on time):", green.length);
-  console.log("[DASHBOARD_PAGE] Yellow (approaching):", yellow.length);
-  console.log("[DASHBOARD_PAGE] Red (overdue):", red.length);
-
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-5">
@@ -44,23 +37,20 @@ export function DashboardPage({
             n: red.length,
             color: "#c1484d",
           },
-        ].map((k) => {
-          console.log("[DASHBOARD_PAGE] Rendering stat card:", k.label, "count:", k.n);
-          return (
-            <div key={k.label} className="relative overflow-hidden rounded-xl px-5 py-4.5" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
-              <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 5, background: k.color }} />
-              <div className="text-3xl" style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
-                {k.n}
-              </div>
-              <div className="text-xs mt-1.5" style={{ color: C.inkSoft }}>
-                {k.label}
-              </div>
-              <div className="text-[11px] mt-0.5" style={{ color: C.inkSoft }}>
-                {k.sub}
-              </div>
+        ].map((k) => (
+          <div key={k.label} className="relative overflow-hidden rounded-xl px-5 py-4.5" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 5, background: k.color }} />
+            <div className="text-3xl" style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
+              {k.n}
             </div>
-          );
-        })}
+            <div className="text-xs mt-1.5" style={{ color: C.inkSoft }}>
+              {k.label}
+            </div>
+            <div className="text-[11px] mt-0.5" style={{ color: C.inkSoft }}>
+              {k.sub}
+            </div>
+          </div>
+        ))}
       </div>
       <div className="rounded-xl overflow-hidden" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
         <table className="w-full border-collapse text-sm">
@@ -74,34 +64,33 @@ export function DashboardPage({
             </tr>
           </thead>
           <tbody>
-            {dashboardSorted.map(({ c, color, deadline }) => {
-              const { date } = formatDisplayDate(c.receivedAt);
-              console.log("[DASHBOARD_PAGE] Rendering dashboard row for contact:", c.id, "color:", color);
+            {dashboardSorted.map(({ a, color, deadline }) => {
+              const { date } = formatDisplayDate(a.receivedAt);
               return (
-                <tr key={c.id} style={{ borderBottom: "1px solid #ece8dc" }}>
+                <tr key={a.id} style={{ borderBottom: "1px solid #ece8dc" }}>
                   <td className="px-4 py-3.5">
                     <Dot color={color} />
                   </td>
                   <td className="px-4 py-3.5">
                     <span className="font-bold text-xs" style={{ fontFamily: "Georgia, serif", color: C.navy700 }}>
-                      {refFor(c)}
+                      {refFor(a)}
                     </span>
                   </td>
                   <td className="px-4 py-3.5">
-                    <div className="font-semibold">{c.name || "—"}</div>
-                    {c.org && (
+                    <div className="font-semibold">{a.contactName || "—"}</div>
+                    {a.companyName && (
                       <div className="text-xs" style={{ color: C.inkSoft }}>
-                        {c.org}
+                        {a.companyName}
                       </div>
                     )}
                   </td>
                   <td className="px-4 py-3.5" style={{ maxWidth: 230 }}>
-                    {c.subject || "—"}
+                    {a.subject || "—"}
                   </td>
                   <td className="px-4 py-3.5">{date}</td>
                   <td className="px-4 py-3.5">{deadline.toLocaleDateString("fr-FR")}</td>
                   <td className="px-4 py-3.5">
-                    <StatusBadge status={c.status} />
+                    <StatusBadge status={a.status} />
                   </td>
                 </tr>
               );
@@ -119,5 +108,3 @@ export function DashboardPage({
     </>
   );
 }
-
-console.log("[DASHBOARD_PAGE] Dashboard Page component loaded successfully");

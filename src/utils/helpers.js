@@ -3,35 +3,27 @@
 // Utility functions for date handling, formatting, and data processing
 // ================================================================
 
+import { STATUS } from "./constants";
+
 console.log("[HELPERS] Initializing helper functions...");
 
 // Date utilities
 export function toLocalInputValue(date) {
-  console.log("[HELPERS] Converting date to local input value:", date);
   const value = new Date(date);
-  if (Number.isNaN(value.getTime())) {
-    console.warn("[HELPERS] Invalid date provided:", date);
-    return "";
-  }
+  if (Number.isNaN(value.getTime())) return "";
   const offset = value.getTimezoneOffset() * 60000;
   return new Date(value.getTime() - offset).toISOString().slice(0, 16);
 }
 
 export function toDateInputValue(date) {
-  console.log("[HELPERS] Converting date to date input value:", date);
   const value = new Date(date);
-  if (Number.isNaN(value.getTime())) {
-    console.warn("[HELPERS] Invalid date provided:", date);
-    return "";
-  }
+  if (Number.isNaN(value.getTime())) return "";
   return toLocalInputValue(value).slice(0, 10);
 }
 
 export function formatDisplayDate(value) {
-  console.log("[HELPERS] Formatting display date:", value);
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    console.warn("[HELPERS] Invalid date for display formatting:", value);
     return { date: "-", time: "-" };
   }
   return {
@@ -41,7 +33,6 @@ export function formatDisplayDate(value) {
 }
 
 export function formatBytes(bytes) {
-  console.log("[HELPERS] Formatting bytes:", bytes);
   if (bytes === 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB"];
@@ -51,71 +42,48 @@ export function formatBytes(bytes) {
 
 // Unique ID generator
 export function newId(prefix = "id") {
-  const id = prefix + "_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-  console.log("[HELPERS] Generated new ID:", id);
-  return id;
+  return prefix + "_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
 }
 
-// Reference generator for contacts
-export function refFor(contact) {
-  console.log("[HELPERS] Generating reference for contact:", contact?.id);
-  if (!contact) return "—";
-  const seq = String(contact.seq || 0).padStart(4, "0");
+// Reference generator for applications
+export function refFor(app) {
+  if (!app) return "—";
+  const seq = String(app.seq || 0).padStart(4, "0");
   return `#${seq}`;
 }
 
 // Compliance color based on deadline
-export function complianceColor(contact) {
-  console.log("[HELPERS] Computing compliance color for contact:", contact?.id);
-  if (!contact) return "green";
-  
+export function complianceColor(app) {
+  if (!app) return "green";
+
   const now = new Date();
-  const deadline = computeDeadline(contact);
-  
-  if (contact.status === "Traité") {
-    const treatedDate = contact.treatedAt ? new Date(contact.treatedAt) : null;
-    if (treatedDate && treatedDate <= deadline) {
-      console.log("[HELPERS] Contact treated on time - GREEN");
-      return "green";
-    }
-    console.log("[HELPERS] Contact treated late - RED");
+  const deadline = computeDeadline(app);
+
+  if (app.status === STATUS.PROCESSED) {
+    const closed = app.closingDate ? new Date(app.closingDate) : null;
+    if (closed && closed <= deadline) return "green";
     return "red";
   }
-  
-  if (now > deadline) {
-    console.log("[HELPERS] Deadline exceeded - RED");
-    return "red";
-  }
-  
+
+  if (now > deadline) return "red";
+
   const daysUntilDeadline = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
-  if (daysUntilDeadline <= 3) {
-    console.log("[HELPERS] Deadline approaching (", daysUntilDeadline, "days) - YELLOW");
-    return "yellow";
-  }
-  
-  console.log("[HELPERS] All good - GREEN");
+  if (daysUntilDeadline <= 3) return "yellow";
+
   return "green";
 }
 
-// Compute deadline for contact
-export function computeDeadline(contact) {
-  console.log("[HELPERS] Computing deadline for contact:", contact?.id);
-  if (!contact || !contact.receivedAt) {
-    console.warn("[HELPERS] No valid contact or receivedAt date");
-    return new Date();
-  }
-  
-  const received = new Date(contact.receivedAt);
-  const delayDays = Number(contact.delayDays) || 30;
-  const deadline = new Date(received.getTime() + delayDays * 24 * 60 * 60 * 1000);
-  
-  console.log("[HELPERS] Deadline computed:", deadline, "with delay of", delayDays, "days");
-  return deadline;
+// Compute deadline for application
+export function computeDeadline(app) {
+  if (!app || !app.receivedAt) return new Date();
+
+  const received = new Date(app.receivedAt);
+  const processingDays = Number(app.processingDays) || 30;
+  return new Date(received.getTime() + processingDays * 24 * 60 * 60 * 1000);
 }
 
 // Organization name normalization
 export function normalizeOrganizationName(user, fallback = "") {
-  console.log("[HELPERS] Normalizing organization name for user");
   return (
     user?.organizationName ||
     user?.organization?.name ||
@@ -128,19 +96,16 @@ export function normalizeOrganizationName(user, fallback = "") {
 
 // User list normalization
 export function normalizeUserList(data) {
-  console.log("[HELPERS] Normalizing user list:", data);
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.users)) return data.users;
   if (Array.isArray(data?.data)) return data.data;
-  console.warn("[HELPERS] Could not normalize user list");
   return [];
 }
 
 // Admin check
 export function isAdminUser(user) {
-  console.log("[HELPERS] Checking if user is admin");
   const role = (user?.role || user?.userRole || "").toString().toLowerCase();
-  const isAdmin = Boolean(
+  return Boolean(
     user?.isAdmin ||
     user?.admin ||
     user?.is_admin ||
@@ -150,22 +115,27 @@ export function isAdminUser(user) {
     role === "superadmin" ||
     role === "super_admin"
   );
-  console.log("[HELPERS] User admin status:", isAdmin);
-  return isAdmin;
 }
 
 // User display name
 export function userDisplayName(user) {
-  const name = user?.fullName || user?.name || user?.username || user?.email || "Utilisateur";
-  console.log("[HELPERS] User display name:", name);
-  return name;
+  return user?.fullName || user?.name || user?.username || user?.email || "Utilisateur";
 }
 
 // Role label
 export function roleLabel(user) {
-  const label = isAdminUser(user) ? "Administrateur" : (user?.role || "Utilisateur");
-  console.log("[HELPERS] Role label:", label);
-  return label;
+  return isAdminUser(user) ? "Administrateur" : (user?.role || "Utilisateur");
 }
 
-console.log("[HELPERS] All helper functions loaded successfully");
+// Generate a UUID for application keys
+export function generateAppId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback UUID v4 generator
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}

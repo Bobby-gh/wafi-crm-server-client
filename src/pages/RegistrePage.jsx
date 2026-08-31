@@ -4,16 +4,14 @@
 // ================================================================
 
 import React from "react";
-import { Search, Plus, Pencil, Eye, Settings2 } from "lucide-react";
-import { C } from "../utils/constants";
+import { Search, Plus, Pencil, Eye } from "lucide-react";
+import { C, STATUS, STATUS_LABELS, CUSTOMER_TYPE, CUSTOMER_TYPE_LABELS } from "../utils/constants";
 import { StatusBadge, inputStyle, Dot } from "../components/widgets";
 import {
   formatDisplayDate,
   complianceColor,
   computeDeadline,
 } from "../utils/helpers";
-
-console.log("[REGISTRE_PAGE] Initializing Registre Page component...");
 
 export function RegistrePage({
   filtered,
@@ -23,19 +21,13 @@ export function RegistrePage({
   setStatusFilter,
   typeFilter,
   setTypeFilter,
-  contacts,
+  applications,
   totalCount,
-  openSettings,
   openNew,
   openDetail,
   openEdit,
   refFor,
 }) {
-  console.log(
-    "[REGISTRE_PAGE] Rendering Registre Page - Filtered count:",
-    filtered.length,
-  );
-
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -52,54 +44,29 @@ export function RegistrePage({
           />
           <input
             value={search}
-            onChange={(e) => {
-              console.log(
-                "[REGISTRE_PAGE] Search input changed:",
-                e.target.value,
-              );
-              setSearch(e.target.value);
-            }}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Rechercher un client, un sujet, une société…"
             style={{ ...inputStyle, paddingLeft: 34 }}
           />
         </div>
         <select
           value={typeFilter}
-          onChange={(e) => {
-            console.log("[REGISTRE_PAGE] Type filter changed:", e.target.value);
-            setTypeFilter(e.target.value);
-          }}
+          onChange={(e) => setTypeFilter(e.target.value)}
           style={{ ...inputStyle, width: "auto" }}>
           <option value="all">Tous les types</option>
-          <option value="Société">Société</option>
-          <option value="Personne physique">Personne physique</option>
+          {Object.values(CUSTOMER_TYPE).map((t) => (
+            <option key={t} value={t}>{CUSTOMER_TYPE_LABELS[t]}</option>
+          ))}
         </select>
         <select
           value={statusFilter}
-          onChange={(e) => {
-            console.log(
-              "[REGISTRE_PAGE] Status filter changed:",
-              e.target.value,
-            );
-            setStatusFilter(e.target.value);
-          }}
+          onChange={(e) => setStatusFilter(e.target.value)}
           style={{ ...inputStyle, width: "auto" }}>
           <option value="all">Tous les statuts</option>
-          <option value="Nouveau">Nouveau</option>
-          <option value="En cours">En cours</option>
-          <option value="Traité">Traité</option>
+          {Object.values(STATUS).map((s) => (
+            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+          ))}
         </select>
-        <button
-          onClick={openSettings}
-          className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold"
-          style={{
-            background: "transparent",
-            color: C.navy900,
-            border: `1px solid ${C.line}`,
-            cursor: "pointer",
-          }}>
-          <Settings2 size={14} /> Délai statutaire par défaut
-        </button>
         <button
           onClick={openNew}
           className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold"
@@ -143,16 +110,13 @@ export function RegistrePage({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((c) => {
-              const { date, time } = formatDisplayDate(c.receivedAt);
-              const deadline = computeDeadline(c);
-              const color = complianceColor(c);
-              console.log(
-                "[REGISTRE_PAGE] Rendering row for contact:', c.id, 'status:', c.status",
-              );
+            {filtered.map((a) => {
+              const { date, time } = formatDisplayDate(a.receivedAt);
+              const deadline = computeDeadline(a);
+              const color = complianceColor(a);
               return (
                 <tr
-                  key={c.id}
+                  key={a.id}
                   className="hover:bg-[#fbfaf6]"
                   style={{ borderBottom: `1px solid #ece8dc` }}>
                   <td className="px-4 py-3.5 align-top">
@@ -162,35 +126,35 @@ export function RegistrePage({
                         fontFamily: "Georgia, serif",
                         color: C.navy700,
                       }}>
-                      {refFor(c)}
+                      {refFor(a)}
                     </span>
                   </td>
                   <td className="px-4 py-3.5 align-top">
-                    <div className="font-semibold">{c.name || "—"}</div>
-                    {c.org && (
+                    <div className="font-semibold">{a.contactName || "—"}</div>
+                    {a.companyName && (
                       <div
                         className="text-xs mt-0.5"
                         style={{ color: C.inkSoft }}>
-                        {c.org}
+                        {a.companyName}
                       </div>
                     )}
                     <div
                       className="text-[10px] font-bold uppercase mt-0.5"
                       style={{ color: C.navy700, letterSpacing: "0.04em" }}>
-                      {c.clientType}
+                      {CUSTOMER_TYPE_LABELS[a.typeOfCustomer] || a.typeOfCustomer}
                     </div>
                   </td>
                   <td
                     className="px-4 py-3.5 align-top text-xs"
                     style={{ color: C.inkSoft }}>
-                    {c.email && <div>{c.email}</div>}
-                    {c.phone && <div>{c.phone}</div>}
-                    {!c.email && !c.phone && <div>—</div>}
+                    {a.email && <div>{a.email}</div>}
+                    {a.phone && <div>{a.phone}</div>}
+                    {!a.email && !a.phone && <div>—</div>}
                   </td>
                   <td
                     className="px-4 py-3.5 align-top"
                     style={{ maxWidth: 230 }}>
-                    {c.subject || "—"}
+                    {a.subject || "—"}
                   </td>
                   <td className="px-4 py-3.5 align-top">
                     <div className="font-semibold">{date}</div>
@@ -199,7 +163,7 @@ export function RegistrePage({
                     </div>
                   </td>
                   <td className="px-4 py-3.5 align-top">
-                    <StatusBadge status={c.status} />
+                    <StatusBadge status={a.status} />
                   </td>
                   <td className="px-4 py-3.5 align-top">
                     <div className="flex items-center text-xs">
@@ -210,12 +174,7 @@ export function RegistrePage({
                   <td className="px-4 py-3.5 align-top">
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => {
-                          console.log(
-                            "[REGISTRE_PAGE] Opening detail for contact:', c.id",
-                          );
-                          openDetail(c);
-                        }}
+                        onClick={() => openDetail(a)}
                         title="Voir les détails"
                         style={{
                           background: "none",
@@ -227,12 +186,7 @@ export function RegistrePage({
                         <Eye size={15} />
                       </button>
                       <button
-                        onClick={() => {
-                          console.log(
-                            "[REGISTRE_PAGE] Opening edit for contact:', c.id)",
-                          );
-                          openEdit(c);
-                        }}
+                        onClick={() => openEdit(a)}
                         title="Modifier"
                         style={{
                           background: "none",
@@ -255,12 +209,12 @@ export function RegistrePage({
             <div
               className="text-lg mb-1.5"
               style={{ fontFamily: "Georgia, serif", color: C.navy800 }}>
-              {contacts.length === 0
+              {applications.length === 0
                 ? "Aucune demande enregistrée"
                 : "Aucun résultat pour ces filtres"}
             </div>
             <div>
-              {contacts.length === 0 &&
+              {applications.length === 0 &&
                 "Cliquez sur « + Nouvelle demande » pour commencer le registre."}
             </div>
           </div>
@@ -273,5 +227,3 @@ export function RegistrePage({
     </>
   );
 }
-
-console.log("[REGISTRE_PAGE] Registre Page component loaded successfully");

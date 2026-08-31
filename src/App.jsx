@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import api, { setAuthToken, clearAuthToken } from "./api";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { setAuthToken, clearAuthToken } from "./api";
+import { signup, login, logout as apiLogout, getCurrentUser, changePassword as apiChangePassword } from "./hooks/useAuth";
+import { listApplications, saveApplication, deleteApplication } from "./hooks/useApplications";
+import { listUsers, createUser } from "./hooks/useUsers";
 import {
   LayoutDashboard,
   ListChecks,
@@ -11,17 +15,14 @@ import {
   EyeOff,
 } from "lucide-react";
 import "./index.css";
-import "../public/login.html"; // for Vite to copy this file to dist
-
-// ================================================================
-// WAFI CAPITAL CRM - Main Application
-// Modular architecture with separated concerns
-// ================================================================
-
-console.log("[APP] Initializing WAFI CRM Application...");
 
 // Import constants and utilities
-import { C, STORAGE_KEY, MAX_FILE_BYTES, EMPTY_FORM } from "./utils/constants";
+import {
+  C,
+  DEFAULT_PROCESSING_DAYS,
+  EMPTY_FORM,
+  STATUS,
+} from "./utils/constants";
 import {
   toLocalInputValue,
   toDateInputValue,
@@ -34,8 +35,8 @@ import {
   normalizeOrganizationName,
   normalizeUserList,
   isAdminUser,
-  userDisplayName,
   roleLabel,
+  generateAppId,
 } from "./utils/helpers";
 
 // Import UI components and widgets
@@ -43,9 +44,7 @@ import {
   StatusBadge,
   Field,
   inputStyle,
-  Dot,
   RequestModal,
-  SettingsModal,
   DetailModal,
 } from "./components/widgets";
 
@@ -55,116 +54,35 @@ import { RegistrePage } from "./pages/RegistrePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { UsersPage } from "./pages/UsersPage";
 
-console.log("[APP] All modules imported successfully");
 
-/* ---------------------------------------------------------------
- * Couche de stockage — parle à l'API du serveur Express/SQLite
- * via l'instance axios `api` (baseURL = VITE_API_URL, withCredentials
- * = true). NE PAS utiliser fetch() directement ici : des chemins
- * relatifs comme "/api/storage/..." se résolvent contre l'origine du
- * front-end (Vercel) et non contre le serveur Express, ce qui donne
- * des 404 qui n'ont rien à voir avec la clé demandée.
- * --------------------------------------------------------------- */
-const storage = {
-  get: async (key) => {
-    console.log("[STORAGE] Getting key:", key);
-    try {
-      const { data } = await api.get("/api/storage/" + encodeURIComponent(key));
-      console.log("[STORAGE] Successfully retrieved key:", key);
-      return { key: data.key, value: data.value };
-    } catch (err) {
-      if (err.response?.status === 404) {
-        console.log("[STORAGE] Key not found:", key);
-        return null;
-      }
-      console.error("[STORAGE] Error getting key:", key, err);
-      throw err;
-    }
-  },
-  set: async (key, value) => {
-    console.log(
-      "[STORAGE] Setting key:",
-      key,
-      "with value length:",
-      value?.length || 0,
-    );
-    try {
-      const { data } = await api.put(
-        "/api/storage/" + encodeURIComponent(key),
-        { value },
-      );
-      console.log("[STORAGE] Successfully set key:", key);
-      return { key: data.key, value: data.value };
-    } catch (err) {
-      console.error("[STORAGE] Error setting key:", key, err);
-      throw err;
-    }
-  },
-  delete: async (key) => {
-    console.log("[STORAGE] Deleting key:", key);
-    try {
-      await api.delete("/api/storage/" + encodeURIComponent(key));
-      console.log("[STORAGE] Successfully deleted key:", key);
-      return { key, deleted: true };
-    } catch (err) {
-      console.error("[STORAGE] Error deleting key:", key, err);
-      throw err;
-    }
-  },
-  list: async (prefix = "") => {
-    console.log("[STORAGE] Listing keys with prefix:", prefix);
-    try {
-      const { data } = await api.get("/api/storage", {
-        params: prefix ? { prefix } : {},
-      });
-      console.log("[STORAGE] Found", data?.length || 0, "items");
-      return data;
-    } catch (err) {
-      console.error("[STORAGE] Error listing keys:", err);
-      throw err;
-    }
-  },
-  listKeys: async () => {
-    console.log("[STORAGE] Listing all keys");
-    try {
-      const { data } = await api.get("/api/storage/keys");
-      console.log("[STORAGE] Found", data.keys?.length || 0, "keys");
-      return data.keys || [];
-    } catch (err) {
-      console.error("[STORAGE] Error listing all keys:", err);
-      throw err;
-    }
-  },
-};
 
+// ================================================================
+// Main Component
+// ================================================================
 export default function WafiCRM() {
-  console.log("[APP] Initializing WafiCRM main component");
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const [contacts, setContacts] = useState([]);
-  const [settings, setSettings] = useState({ defaultDelayDays: 30 });
+  // App data
+  const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("registre");
 
+  // Filters
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
 
+  // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [detailRecord, setDetailRecord] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [exchanges, setExchanges] = useState([]);
-  const [attachments, setAttachments] = useState([]);
-  const [removedAttachmentIds, setRemovedAttachmentIds] = useState([]);
-  const [exDraft, setExDraft] = useState({ date: "", type: "Email", note: "" });
-  const [uploadWarning, setUploadWarning] = useState("");
+  const [exDraft, setExDraft] = useState({ date: "", type: "Email", summary: "" });
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
-  const fileInputRef = useRef(null);
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [defaultDelayDraft, setDefaultDelayDraft] = useState(30);
-
+  // Auth state
   const [authMode, setAuthMode] = useState("setup");
   const [currentUser, setCurrentUser] = useState(null);
   const [username, setUsername] = useState("");
@@ -188,62 +106,54 @@ export default function WafiCRM() {
   const [changePasswordError, setChangePasswordError] = useState("");
   const [changePasswordLoading, setChangePasswordLoading] = useState(false);
 
-  const [appView, setAppView] = useState("registre");
+  // User management
   const [canManageUsers, setCanManageUsers] = useState(false);
   const [orgUsers, setOrgUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState("");
-  const [userForm, setUserForm] = useState({
-    username: "",
-    email: "",
-    fullName: "",
-  });
+  const [userForm, setUserForm] = useState({ username: "", email: "" });
   const [userCreateLoading, setUserCreateLoading] = useState(false);
   const [temporaryPassword, setTemporaryPassword] = useState(null);
 
+  // ================================================================
+  // Helper to handle 428 (password change required)
+  // ================================================================
+  function handle428() {
+    setMustChangePassword(true);
+  }
+
+  // ================================================================
+  // Session management
+  // ================================================================
   function resetSession() {
-    console.log("[APP] Resetting session");
     clearAuthToken();
     setCurrentUser(null);
     setUsername("");
     setIsAuthenticated(false);
     setOrganizationName("");
     setMustChangePassword(false);
-    setContacts([]);
-    setSettings({ defaultDelayDays: 30 });
+    setApplications([]);
     setAuthError("");
     setChangePasswordError("");
     setOrgUsers([]);
     setUsersError("");
     setTemporaryPassword(null);
     setCanManageUsers(false);
-    setAppView("registre");
+    navigate("/registre");
   }
 
-  async function loadStoredData() {
-    console.log("[APP] Loading stored data");
+  async function loadApplications() {
     try {
-      const res = await storage.get(STORAGE_KEY);
-
-      const parsed = res?.value ? JSON.parse(res.value) : null;
-
-      console.log(
-        "[APP] Stored data loaded - contacts:",
-        parsed?.contacts?.length || 0,
-      );
-
-      setContacts(parsed?.contacts || []);
-      setSettings(parsed?.settings || { defaultDelayDays: 30 });
+      const apps = await listApplications();
+      setApplications(apps);
     } catch (e) {
       if (e.response?.status === 401) {
-        console.warn("[APP] Unauthorized when loading stored data");
         resetSession();
-        return;
+      } else if (e.response?.status === 428) {
+        handle428();
+      } else {
+        setApplications([]);
       }
-
-      console.error("[APP] Error loading stored data:", e);
-      setContacts([]);
-      setSettings({ defaultDelayDays: 30 });
     }
   }
 
@@ -260,7 +170,7 @@ export default function WafiCRM() {
     );
     setIsAuthenticated(true);
     setMustChangePassword(Boolean(user?.mustChangePassword));
-    setAppView("registre");
+    navigate("/registre");
   }
 
   async function loadUsers(allowProbe = false, userOverride = null) {
@@ -269,7 +179,7 @@ export default function WafiCRM() {
     setUsersLoading(true);
     setUsersError("");
     try {
-      const { data } = await api.get("/api/users");
+      const data = await listUsers();
       setCanManageUsers(true);
       setOrgUsers(normalizeUserList(data));
     } catch (e) {
@@ -277,35 +187,37 @@ export default function WafiCRM() {
         resetSession();
         return;
       }
+      if (e.response?.status === 428) {
+        handle428();
+        return;
+      }
       if (e.response?.status === 403) {
         setCanManageUsers(false);
         if (allowProbe) return;
-        setUsersError(
-          "Accès refusé : seuls les administrateurs peuvent gérer les utilisateurs.",
-        );
+        setUsersError("Accès refusé : seuls les administrateurs peuvent gérer les utilisateurs.");
         return;
       }
-      setUsersError(
-        "Impossible de charger les utilisateurs de l'organisation.",
-      );
+      setUsersError("Impossible de charger les utilisateurs de l'organisation.");
     } finally {
       setUsersLoading(false);
     }
   }
 
   async function loadCurrentUser() {
-    const { data } = await api.get("/api/me");
+    const data = await getCurrentUser();
     applyUserSession(
       data,
       data?.username || localStorage.getItem("wafi_username") || "",
     );
     if (!data?.mustChangePassword) {
-      await loadStoredData();
+      await loadApplications();
       await loadUsers(true, data);
     }
   }
 
-  /* ---------------- auth + load / save ---------------- */
+  // ================================================================
+  // Auth: init
+  // ================================================================
   useEffect(() => {
     (async () => {
       try {
@@ -316,15 +228,15 @@ export default function WafiCRM() {
           setLoading(false);
           return;
         }
-
         await loadCurrentUser();
       } catch (e) {
         if (e.response?.status === 401) {
           resetSession();
+        } else if (e.response?.status === 428) {
+          handle428();
         } else {
           setIsAuthenticated(false);
-          setContacts([]);
-          setSettings({ defaultDelayDays: 30 });
+          setApplications([]);
         }
       } finally {
         setLoading(false);
@@ -332,26 +244,27 @@ export default function WafiCRM() {
     })();
   }, []);
 
+  // ================================================================
+  // Auth: signup / login
+  // ================================================================
   async function handleAuthSubmit(e) {
     e.preventDefault();
     setAuthLoading(true);
     setAuthError("");
 
     try {
-      const endpoint = authMode === "setup" ? "/api/signup" : "/api/login";
-      const payload =
-        authMode === "setup"
-          ? {
-              username: authForm.username.trim(),
-              password: authForm.password,
-              email: authForm.email.trim(),
-              organizationName: authForm.organizationName.trim(),
-              organization: authForm.organizationName.trim(),
-              companyName: authForm.organizationName.trim(),
-            }
-          : { username: authForm.username.trim(), password: authForm.password };
+      const data = authMode === "setup"
+        ? await signup({
+            username: authForm.username.trim(),
+            password: authForm.password,
+            email: authForm.email.trim(),
+            organizationName: authForm.organizationName.trim(),
+          })
+        : await login({
+            username: authForm.username.trim(),
+            password: authForm.password,
+          });
 
-      const { data } = await api.post(endpoint, payload);
       const nextUser = data.user || {
         username: data.username || payload.username,
         organizationName: data.organizationName || authForm.organizationName,
@@ -368,15 +281,13 @@ export default function WafiCRM() {
           newPassword: "",
           confirmPassword: "",
         });
-        setAppView("registre");
         setLoading(false);
         return;
       }
 
-      await loadStoredData();
+      await loadApplications();
       await loadUsers(true, nextUser);
     } catch (e) {
-      console.error("Create user error:", e.response?.data || e);
       if (e.response?.status === 401) {
         setAuthError("Identifiants invalides.");
       } else if (e.response?.status === 409) {
@@ -391,24 +302,23 @@ export default function WafiCRM() {
     }
   }
 
+  // ================================================================
+  // Auth: change password
+  // ================================================================
   async function handleChangePasswordSubmit(e) {
     e.preventDefault();
     setChangePasswordLoading(true);
     setChangePasswordError("");
 
     if (changePasswordForm.newPassword !== changePasswordForm.confirmPassword) {
-      setChangePasswordError(
-        "Les nouveaux mots de passe ne correspondent pas.",
-      );
+      setChangePasswordError("Les nouveaux mots de passe ne correspondent pas.");
       setChangePasswordLoading(false);
       return;
     }
 
     try {
-      const { data } = await api.post("/api/auth/change-password", {
+      const data = await apiChangePassword({
         currentPassword: changePasswordForm.currentPassword,
-        oldPassword: changePasswordForm.currentPassword,
-        password: changePasswordForm.newPassword,
         newPassword: changePasswordForm.newPassword,
       });
       if (data?.token) {
@@ -416,12 +326,8 @@ export default function WafiCRM() {
       }
       await loadCurrentUser();
       setMustChangePassword(false);
-      setChangePasswordForm({
-        currentPassword: "",
-        newPassword: "",
-        confirmPassword: "",
-      });
-      await loadStoredData();
+      setChangePasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      await loadApplications();
       if (isAdminUser(currentUser || data?.user)) {
         await loadUsers(true, currentUser || data?.user);
       }
@@ -438,6 +344,9 @@ export default function WafiCRM() {
     }
   }
 
+  // ================================================================
+  // User management
+  // ================================================================
   async function handleCreateUser(e) {
     e.preventDefault();
     setUserCreateLoading(true);
@@ -445,28 +354,24 @@ export default function WafiCRM() {
     setTemporaryPassword(null);
 
     try {
-      const { data } = await api.post("/api/users", {
+      const data = await createUser({
         username: userForm.username.trim(),
         email: userForm.email.trim(),
-        fullName: userForm.fullName.trim(),
-        name: userForm.fullName.trim(),
       });
       if (data?.temporaryPassword) {
         setTemporaryPassword({
-          username: data.username || userForm.username.trim(),
+          username: data.username || data.user?.username || userForm.username.trim(),
           password: data.temporaryPassword,
         });
       }
-      setUserForm({ username: "", email: "", fullName: "" });
+      setUserForm({ username: "", email: "" });
       await loadUsers();
     } catch (e) {
       if (e.response?.status === 401) {
         resetSession();
       } else if (e.response?.status === 403) {
         setCanManageUsers(false);
-        setUsersError(
-          "Accès refusé : seuls les administrateurs peuvent gérer les utilisateurs.",
-        );
+        setUsersError("Accès refusé : seuls les administrateurs peuvent gérer les utilisateurs.");
       } else {
         setUsersError("Impossible de créer l'utilisateur pour le moment.");
       }
@@ -477,75 +382,57 @@ export default function WafiCRM() {
 
   async function handleLogout() {
     try {
-      await api.post("/api/logout");
-    } catch (e) {
-      console.error("Erreur de déconnexion", e);
+      await apiLogout();
+    } catch {
+      // ok
     } finally {
       resetSession();
       setAuthMode("login");
     }
   }
 
-  const persist = useCallback(async (nextContacts, nextSettings) => {
-    try {
-      await storage.set(
-        STORAGE_KEY,
-        JSON.stringify({ contacts: nextContacts, settings: nextSettings }),
-      );
-    } catch (e) {
-      if (e.response?.status === 401) {
-        resetSession();
-        throw e;
-      }
-      console.error("Erreur d'enregistrement", e);
-      throw e;
-    }
-  }, []);
-
+  // ================================================================
+  // Application CRUD (modal)
+  // ================================================================
   function nextSeq() {
-    return contacts.reduce((max, c) => Math.max(max, c.seq || 0), 0) + 1;
+    return applications.reduce((max, a) => Math.max(max, a.seq || 0), 0) + 1;
   }
 
-  /* ---------------- modal open/close ---------------- */
   function openNew() {
     setEditingId(null);
     setForm({
       ...EMPTY_FORM,
       receivedAt: toLocalInputValue(new Date()),
-      delayDays: settings.defaultDelayDays,
+      processingDays: DEFAULT_PROCESSING_DAYS,
     });
     setExchanges([]);
-    setAttachments([]);
-    setRemovedAttachmentIds([]);
-    setExDraft({ date: toDateInputValue(new Date()), type: "Email", note: "" });
-    setUploadWarning("");
+    setExDraft({ date: toDateInputValue(new Date()), type: "Email", summary: "" });
     setSaveError("");
     setModalOpen(true);
   }
-  function openEdit(c) {
-    setEditingId(c.id);
+
+  function openEdit(a) {
+    setEditingId(a.id);
     setForm({
-      clientType: c.clientType,
-      org: c.org || "",
-      name: c.name || "",
-      email: c.email || "",
-      phone: c.phone || "",
-      attachment: c.attachment || "",
-      subject: c.subject || "",
-      receivedAt: toLocalInputValue(new Date(c.receivedAt)),
-      delayDays: c.delayDays,
-      status: c.status,
-      treatedAt: c.treatedAt ? toDateInputValue(new Date(c.treatedAt)) : "",
-      notes: c.notes || "",
+      typeOfCustomer: a.typeOfCustomer || STATUS.NEW,
+      companyName: a.companyName || "",
+      contactName: a.contactName || "",
+      email: a.email || "",
+      phone: a.phone || "",
+      attachment: a.attachment || "",
+      subject: a.subject || "",
+      receivedAt: toLocalInputValue(new Date(a.receivedAt)),
+      processingDays: a.processingDays || DEFAULT_PROCESSING_DAYS,
+      status: a.status || STATUS.NEW,
+      closingDate: a.closingDate ? toDateInputValue(new Date(a.closingDate)) : "",
+      notes: a.notes || "",
     });
-    setExchanges(JSON.parse(JSON.stringify(c.exchanges || [])));
-    setAttachments(JSON.parse(JSON.stringify(c.attachments || [])));
-    setRemovedAttachmentIds([]);
-    setExDraft({ date: toDateInputValue(new Date()), type: "Email", note: "" });
-    setUploadWarning("");
+    setExchanges(JSON.parse(JSON.stringify(a.exchanges || [])));
+    setExDraft({ date: toDateInputValue(new Date()), type: "Email", summary: "" });
     setSaveError("");
     setModalOpen(true);
   }
+
   function closeModal() {
     setModalOpen(false);
     setEditingId(null);
@@ -559,94 +446,29 @@ export default function WafiCRM() {
     setDetailRecord(null);
   }
 
-  /* ---------------- exchanges ---------------- */
+  // ================================================================
+  // Exchanges
+  // ================================================================
   function addExchange() {
-    if (!exDraft.note.trim() || !exDraft.date) return;
+    if (!exDraft.summary.trim() || !exDraft.date) return;
     setExchanges((prev) => [
       ...prev,
       {
-        id: newId("ex"),
         date: new Date(exDraft.date).toISOString(),
         type: exDraft.type,
-        note: exDraft.note.trim(),
+        summary: exDraft.summary.trim(),
       },
     ]);
-    setExDraft((d) => ({ ...d, note: "" }));
-  }
-  function removeExchange(id) {
-    setExchanges((prev) => prev.filter((x) => x.id !== id));
+    setExDraft((d) => ({ ...d, summary: "" }));
   }
 
-  /* ---------------- attachments ---------------- */
-  async function handleFiles(e) {
-    const files = Array.from(e.target.files || []);
-    setUploadWarning("");
-    for (const file of files) {
-      if (file.type !== "application/pdf") {
-        setUploadWarning(
-          `« ${file.name} » ignoré : seuls les fichiers PDF sont acceptés.`,
-        );
-        continue;
-      }
-      if (file.size > MAX_FILE_BYTES) {
-        setUploadWarning(
-          `« ${file.name} » dépasse 3,5 Mo et n'a pas été ajouté.`,
-        );
-        continue;
-      }
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      setAttachments((prev) => [
-        ...prev,
-        {
-          id: newId("att"),
-          filename: file.name,
-          size: file.size,
-          isNew: true,
-          dataUrl,
-        },
-      ]);
-    }
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
-  function removeAttachment(id) {
-    const att = attachments.find((a) => a.id === id);
-    if (att && !att.isNew) setRemovedAttachmentIds((prev) => [...prev, id]);
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
-  }
-  async function downloadAttachment(id, list = attachments) {
-    const att = (list || attachments).find((a) => a.id === id);
-    if (!att) return;
-    let dataUrl = att.dataUrl;
-    if (!dataUrl) {
-      try {
-        const res = await storage.get("wafi-crm-file:" + id);
-        dataUrl = res?.value;
-      } catch (e) {
-        alert("Impossible de récupérer ce document.");
-        return;
-      }
-    }
-    if (!dataUrl) {
-      alert("Document introuvable.");
-      return;
-    }
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = att.filename;
-    document.body.appendChild(link);
-    try {
-      link.click();
-    } finally {
-      link.remove?.();
-    }
+  function removeExchange(idx) {
+    setExchanges((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  /* ---------------- save / delete contact ---------------- */
+  // ================================================================
+  // Save / Delete application
+  // ================================================================
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
@@ -655,116 +477,89 @@ export default function WafiCRM() {
       const receivedAt = new Date(form.receivedAt);
       if (Number.isNaN(receivedAt.getTime())) {
         setSaveError("La date de réception est invalide.");
+        setSaving(false);
         return;
       }
 
-      for (const id of removedAttachmentIds) {
-        await storage.delete("wafi-crm-file:" + id);
-      }
-      for (const att of attachments) {
-        if (att.isNew) {
-          await storage.set("wafi-crm-file:" + att.id, att.dataUrl);
-        }
-      }
-
-      const attachmentsMeta = attachments.map((a) => ({
-        id: a.id,
-        filename: a.filename,
-        size: a.size,
-        uploadedAt: a.uploadedAt || new Date().toISOString(),
-      }));
+      const appId = editingId || generateAppId();
       const payload = {
-        clientType: form.clientType,
-        org: form.org.trim(),
-        name: form.name.trim(),
+        typeOfCustomer: form.typeOfCustomer,
+        companyName: form.companyName.trim(),
+        contactName: form.contactName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         attachment: form.attachment.trim(),
-        attachments: attachmentsMeta,
         subject: form.subject.trim(),
         receivedAt: receivedAt.toISOString(),
-        delayDays: Number(form.delayDays) || settings.defaultDelayDays,
+        processingDays: Number(form.processingDays) || DEFAULT_PROCESSING_DAYS,
         status: form.status,
-        treatedAt: form.treatedAt
-          ? new Date(form.treatedAt).toISOString()
+        closingDate: form.closingDate
+          ? new Date(form.closingDate).toISOString()
           : null,
         notes: form.notes.trim(),
         exchanges,
+        seq: editingId
+          ? applications.find((a) => a.id === editingId)?.seq || nextSeq()
+          : nextSeq(),
       };
-      let next;
-      if (editingId) {
-        next = contacts.map((c) =>
-          c.id === editingId ? { ...c, ...payload } : c,
-        );
-      } else {
-        next = [...contacts, { id: newId("c"), seq: nextSeq(), ...payload }];
-      }
-      await persist(next, settings);
-      setContacts(next);
+
+      await saveApplication(appId, payload);
+
+      // Refresh list
+      await loadApplications();
       closeModal();
     } catch (e) {
       if (e.response?.status === 401) {
         resetSession();
+      } else if (e.response?.status === 428) {
+        handle428();
       } else {
-        setSaveError(
-          "La demande n'a pas pu être enregistrée. Vérifiez la connexion au serveur et réessayez.",
-        );
+        setSaveError("La demande n'a pas pu être enregistrée. Vérifiez la connexion au serveur et réessayez.");
       }
     } finally {
       setSaving(false);
     }
   }
+
   async function handleDelete() {
     if (!editingId) return;
     if (!confirm("Supprimer cette demande du registre ?")) return;
-    const c = contacts.find((c) => c.id === editingId);
-    for (const a of c?.attachments || []) {
-      try {
-        await storage.delete("wafi-crm-file:" + a.id);
-      } catch (e) {}
+    try {
+      await deleteApplication(editingId);
+      await loadApplications();
+      closeModal();
+    } catch (e) {
+      if (e.response?.status === 401) {
+        resetSession();
+      } else if (e.response?.status === 428) {
+        handle428();
+      }
     }
-    const next = contacts.filter((c) => c.id !== editingId);
-    setContacts(next);
-    await persist(next, settings);
-    closeModal();
   }
 
-  /* ---------------- settings ---------------- */
-  function openSettings() {
-    setDefaultDelayDraft(settings.defaultDelayDays);
-    setSettingsOpen(true);
-  }
-  async function saveSettings() {
-    const nextSettings = {
-      ...settings,
-      defaultDelayDays: Number(defaultDelayDraft) || 30,
-    };
-    setSettings(nextSettings);
-    await persist(contacts, nextSettings);
-    setSettingsOpen(false);
-  }
-
-  /* ---------------- derived data ---------------- */
-  const filtered = contacts
+  // ================================================================
+  // Derived data
+  // ================================================================
+  const filtered = applications
     .slice()
     .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt))
-    .filter((c) => {
+    .filter((a) => {
       const q = search.trim().toLowerCase();
       if (q) {
-        const hit = [c.name, c.org, c.subject, c.email].some((v) =>
-          (v || "").toLowerCase().includes(q),
+        const hit = [a.contactName, a.companyName, a.subject, a.email].some(
+          (v) => (v || "").toLowerCase().includes(q),
         );
         if (!hit) return false;
       }
-      if (statusFilter !== "all" && c.status !== statusFilter) return false;
-      if (typeFilter !== "all" && c.clientType !== typeFilter) return false;
+      if (statusFilter !== "all" && a.status !== statusFilter) return false;
+      if (typeFilter !== "all" && a.typeOfCustomer !== typeFilter) return false;
       return true;
     });
 
-  const withColor = contacts.map((c) => ({
-    c,
-    color: complianceColor(c),
-    deadline: computeDeadline(c),
+  const withColor = applications.map((a) => ({
+    a,
+    color: complianceColor(a),
+    deadline: computeDeadline(a),
   }));
   const green = withColor.filter((x) => x.color === "green");
   const yellow = withColor.filter((x) => x.color === "yellow");
@@ -774,19 +569,23 @@ export default function WafiCRM() {
     .slice()
     .sort((a, b) => order[a.color] - order[b.color] || a.deadline - b.deadline);
 
-  const totalCount = contacts.length;
-  const openCount = contacts.filter(
-    (c) => c.status === "En cours" || c.status === "Nouveau",
+  const totalCount = applications.length;
+  const openCount = applications.filter(
+    (a) => a.status === STATUS.IN_PROGRESS || a.status === STATUS.NEW,
   ).length;
   const userIsAdmin = isAdminUser(currentUser) || canManageUsers;
   const organizationLabel =
     organizationName || normalizeOrganizationName(currentUser, "");
+  const currentPath = location.pathname.replace("/", "") || "registre";
   const displayedView = userIsAdmin
-    ? appView
-    : appView === "users"
+    ? currentPath
+    : currentPath === "users"
       ? "registre"
-      : appView;
+      : currentPath;
 
+  // ================================================================
+  // Render: Loading
+  // ================================================================
   if (loading) {
     return (
       <div
@@ -797,6 +596,9 @@ export default function WafiCRM() {
     );
   }
 
+  // ================================================================
+  // Render: Auth (login/signup)
+  // ================================================================
   if (!isAuthenticated) {
     return (
       <div
@@ -823,7 +625,7 @@ export default function WafiCRM() {
             <p className="text-sm mt-2" style={{ color: C.inkSoft }}>
               {authMode === "setup"
                 ? "Créez la première organisation et le premier compte administrateur."
-                : "Utilisez votre compte pour synchroniser les données avec l’API backend."}
+                : "Utilisez votre compte pour synchroniser les données avec l'API backend."}
             </p>
           </div>
 
@@ -832,9 +634,7 @@ export default function WafiCRM() {
               <input
                 required
                 value={authForm.username}
-                onChange={(e) =>
-                  setAuthForm((f) => ({ ...f, username: e.target.value }))
-                }
+                onChange={(e) => setAuthForm((f) => ({ ...f, username: e.target.value }))}
                 style={inputStyle}
                 autoComplete="username"
               />
@@ -844,12 +644,7 @@ export default function WafiCRM() {
                 <input
                   required
                   value={authForm.organizationName}
-                  onChange={(e) =>
-                    setAuthForm((f) => ({
-                      ...f,
-                      organizationName: e.target.value,
-                    }))
-                  }
+                  onChange={(e) => setAuthForm((f) => ({ ...f, organizationName: e.target.value }))}
                   style={inputStyle}
                   autoComplete="organization"
                 />
@@ -861,9 +656,7 @@ export default function WafiCRM() {
                   required
                   type="email"
                   value={authForm.email}
-                  onChange={(e) =>
-                    setAuthForm((f) => ({ ...f, email: e.target.value }))
-                  }
+                  onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
                   style={inputStyle}
                   autoComplete="email"
                 />
@@ -875,13 +668,9 @@ export default function WafiCRM() {
                   required
                   type={passwordVisible ? "text" : "password"}
                   value={authForm.password}
-                  onChange={(e) =>
-                    setAuthForm((f) => ({ ...f, password: e.target.value }))
-                  }
+                  onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
                   style={{ ...inputStyle, paddingRight: 40 }}
-                  autoComplete={
-                    authMode === "setup" ? "new-password" : "current-password"
-                  }
+                  autoComplete={authMode === "setup" ? "new-password" : "current-password"}
                 />
                 <button
                   type="button"
@@ -896,20 +685,13 @@ export default function WafiCRM() {
                     padding: 0,
                     cursor: "pointer",
                     color: C.inkSoft,
-                  }}
-                  aria-label={
-                    passwordVisible
-                      ? "Masquer le mot de passe"
-                      : "Afficher le mot de passe"
-                  }>
+                  }}>
                   {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </Field>
             {authError && (
-              <div className="text-sm" style={{ color: C.red }}>
-                {authError}
-              </div>
+              <div className="text-sm" style={{ color: C.red }}>{authError}</div>
             )}
             <button
               type="submit"
@@ -930,9 +712,7 @@ export default function WafiCRM() {
             </button>
           </form>
 
-          <div
-            className="text-center text-sm mt-4"
-            style={{ color: C.inkSoft }}>
+          <div className="text-center text-sm mt-4" style={{ color: C.inkSoft }}>
             {authMode === "setup"
               ? "Vous avez déjà un compte ?"
               : "Première fois ici ?"}
@@ -957,6 +737,9 @@ export default function WafiCRM() {
     );
   }
 
+  // ================================================================
+  // Render: Must change password
+  // ================================================================
   if (mustChangePassword) {
     return (
       <div
@@ -993,12 +776,7 @@ export default function WafiCRM() {
                 required
                 type={passwordVisible ? "text" : "password"}
                 value={changePasswordForm.currentPassword}
-                onChange={(e) =>
-                  setChangePasswordForm((f) => ({
-                    ...f,
-                    currentPassword: e.target.value,
-                  }))
-                }
+                onChange={(e) => setChangePasswordForm((f) => ({ ...f, currentPassword: e.target.value }))}
                 style={inputStyle}
                 autoComplete="current-password"
               />
@@ -1008,12 +786,7 @@ export default function WafiCRM() {
                 required
                 type={passwordVisible ? "text" : "password"}
                 value={changePasswordForm.newPassword}
-                onChange={(e) =>
-                  setChangePasswordForm((f) => ({
-                    ...f,
-                    newPassword: e.target.value,
-                  }))
-                }
+                onChange={(e) => setChangePasswordForm((f) => ({ ...f, newPassword: e.target.value }))}
                 style={inputStyle}
                 autoComplete="new-password"
               />
@@ -1023,20 +796,13 @@ export default function WafiCRM() {
                 required
                 type={passwordVisible ? "text" : "password"}
                 value={changePasswordForm.confirmPassword}
-                onChange={(e) =>
-                  setChangePasswordForm((f) => ({
-                    ...f,
-                    confirmPassword: e.target.value,
-                  }))
-                }
+                onChange={(e) => setChangePasswordForm((f) => ({ ...f, confirmPassword: e.target.value }))}
                 style={inputStyle}
                 autoComplete="new-password"
               />
             </Field>
             {changePasswordError && (
-              <div className="text-sm" style={{ color: C.red }}>
-                {changePasswordError}
-              </div>
+              <div className="text-sm" style={{ color: C.red }}>{changePasswordError}</div>
             )}
             <button
               type="submit"
@@ -1049,9 +815,7 @@ export default function WafiCRM() {
                 cursor: "pointer",
                 opacity: changePasswordLoading ? 0.7 : 1,
               }}>
-              {changePasswordLoading
-                ? "Mise à jour…"
-                : "Enregistrer le nouveau mot de passe"}
+              {changePasswordLoading ? "Mise à jour…" : "Enregistrer le nouveau mot de passe"}
             </button>
           </form>
         </div>
@@ -1059,14 +823,16 @@ export default function WafiCRM() {
     );
   }
 
+  // ================================================================
+  // Render: Main app shell
+  // ================================================================
   return (
     <div
       className="min-h-screen"
       style={{
         background: C.paper,
         color: C.ink,
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
       }}>
       <div className="max-w-6xl mx-auto px-6 py-7 pb-16">
         {/* Masthead */}
@@ -1133,17 +899,15 @@ export default function WafiCRM() {
           </div>
         </div>
 
+        {/* Organization bar */}
         <div
           className="text-xs rounded-lg px-3.5 py-2 mb-4"
-          style={{
-            background: C.paper2,
-            border: `1px solid ${C.line}`,
-            color: C.inkSoft,
-          }}>
+          style={{ background: C.paper2, border: `1px solid ${C.line}`, color: C.inkSoft }}>
           <b style={{ color: C.navy800 }}>Organisation</b> —{" "}
           {organizationLabel || "Organisation active"}
         </div>
 
+        {/* User bar */}
         <div
           className="flex flex-wrap items-center justify-end gap-3 mb-3.5 text-xs"
           style={{ color: C.inkSoft }}>
@@ -1152,45 +916,24 @@ export default function WafiCRM() {
           </span>
           <span
             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full"
-            style={{
-              background: C.paper2,
-              border: `1px solid ${C.line}`,
-              color: C.navy800,
-            }}>
+            style={{ background: C.paper2, border: `1px solid ${C.line}`, color: C.navy800 }}>
             <Building2 size={12} /> {organizationLabel || "Organisation"}
           </span>
           <span
             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full"
-            style={{
-              background: C.paper2,
-              border: `1px solid ${C.line}`,
-              color: C.navy800,
-            }}>
+            style={{ background: C.paper2, border: `1px solid ${C.line}`, color: C.navy800 }}>
             <Shield size={12} /> {roleLabel(currentUser)}
           </span>
           <button
             onClick={handleLogout}
             className="px-3 py-1.5 rounded-md text-xs font-semibold"
-            style={{
-              background: "transparent",
-              border: `1px solid ${C.line}`,
-              color: C.navy900,
-              cursor: "pointer",
-            }}>
+            style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.navy900, cursor: "pointer" }}>
             Déconnexion
           </button>
           <button
-            onClick={() => {
-              setAppView("registre");
-              openNew();
-            }}
+            onClick={() => { navigate("/registre"); openNew(); }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold"
-            style={{
-              background: C.navy900,
-              color: C.gold400,
-              border: "none",
-              cursor: "pointer",
-            }}>
+            style={{ background: C.navy900, color: C.gold400, border: "none", cursor: "pointer" }}>
             <Plus size={13} /> Nouvelle demande
           </button>
         </div>
@@ -1201,28 +944,20 @@ export default function WafiCRM() {
           style={{ borderBottom: `1px solid ${C.line}` }}>
           {[
             { id: "registre", label: "Registre", icon: ListChecks },
-            {
-              id: "dashboard",
-              label: "Tableau de bord",
-              icon: LayoutDashboard,
-            },
-            ...(userIsAdmin
-              ? [{ id: "users", label: "Utilisateurs", icon: Users }]
-              : []),
+            { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+            ...(userIsAdmin ? [{ id: "users", label: "Utilisateurs", icon: Users }] : []),
           ].map((t) => (
             <button
               key={t.id}
-              onClick={() => setAppView(t.id)}
+              onClick={() => navigate(`/${t.id}`)}
               className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold -mb-px"
               style={{
                 color: displayedView === t.id ? C.navy900 : C.inkSoft,
-                borderBottom: `2px solid ${displayedView === t.id ? C.gold500 : "transparent"}`,
-                background: "none",
-                border: "none",
                 borderBottomWidth: 2,
                 borderBottomStyle: "solid",
-                borderBottomColor:
-                  displayedView === t.id ? C.gold500 : "transparent",
+                borderBottomColor: displayedView === t.id ? C.gold500 : "transparent",
+                background: "none",
+                border: "none",
                 cursor: "pointer",
               }}>
               <t.icon size={15} />
@@ -1231,1060 +966,98 @@ export default function WafiCRM() {
           ))}
         </div>
 
-        {displayedView === "registre" && (
-          <RegistrePage
-            filtered={filtered}
-            search={search}
-            setSearch={setSearch}
-            statusFilter={statusFilter}
-            setStatusFilter={setStatusFilter}
-            typeFilter={typeFilter}
-            setTypeFilter={setTypeFilter}
-            contacts={contacts}
-            totalCount={totalCount}
-            openSettings={openSettings}
-            openNew={openNew}
-            openDetail={openDetail}
-            openEdit={openEdit}
-            refFor={refFor}
+        {/* Routes */}
+        <Routes>
+          <Route
+            path="/registre"
+            element={
+              <RegistrePage
+                filtered={filtered}
+                search={search}
+                setSearch={setSearch}
+                statusFilter={statusFilter}
+                setStatusFilter={setStatusFilter}
+                typeFilter={typeFilter}
+                setTypeFilter={setTypeFilter}
+                applications={applications}
+                totalCount={totalCount}
+                openNew={openNew}
+                openDetail={openDetail}
+                openEdit={openEdit}
+                refFor={refFor}
+              />
+            }
           />
-        )}
-
-        {displayedView === "dashboard" && (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-5">
-              {[
-                {
-                  label: "Traités dans les délais",
-                  sub: "Dossiers clôturés avant l'échéance statutaire",
-                  n: green.length,
-                  color: C.green,
-                },
-                {
-                  label: "En cours, dans les délais",
-                  sub: "Dossiers ouverts, échéance non dépassée",
-                  n: yellow.length,
-                  color: "#c99a1a",
-                },
-                {
-                  label: "Hors délai",
-                  sub: "Échéance dépassée, traités en retard ou toujours ouverts",
-                  n: red.length,
-                  color: "#c1484d",
-                },
-              ].map((k) => (
-                <div
-                  key={k.label}
-                  className="relative overflow-hidden rounded-xl px-5 py-4.5"
-                  style={{ background: "#fff", border: `1px solid ${C.line}` }}>
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: 5,
-                      background: k.color,
-                    }}
-                  />
-                  <div
-                    className="text-3xl"
-                    style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
-                    {k.n}
-                  </div>
-                  <div className="text-xs mt-1.5" style={{ color: C.inkSoft }}>
-                    {k.label}
-                  </div>
-                  <div
-                    className="text-[11px] mt-0.5"
-                    style={{ color: C.inkSoft }}>
-                    {k.sub}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div
-              className="rounded-xl overflow-hidden"
-              style={{ background: "#fff", border: `1px solid ${C.line}` }}>
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr style={{ background: C.paper2 }}>
-                    {[
-                      "",
-                      "Réf.",
-                      "Client",
-                      "Sujet",
-                      "Reçu le",
-                      "Échéance",
-                      "Statut",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase"
-                        style={{
-                          color: C.inkSoft,
-                          letterSpacing: "0.08em",
-                          borderBottom: `1px solid ${C.line}`,
-                        }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {dashboardSorted.map(({ c, color, deadline }) => {
-                    const { date } = formatDisplayDate(c.receivedAt);
-                    return (
-                      <tr
-                        key={c.id}
-                        style={{ borderBottom: "1px solid #ece8dc" }}>
-                        <td className="px-4 py-3.5">
-                          <Dot color={color} />
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <span
-                            className="font-bold text-xs"
-                            style={{
-                              fontFamily: "Georgia, serif",
-                              color: C.navy700,
-                            }}>
-                            {refFor(c)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <div className="font-semibold">{c.name || "—"}</div>
-                          {c.org && (
-                            <div
-                              className="text-xs"
-                              style={{ color: C.inkSoft }}>
-                              {c.org}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3.5" style={{ maxWidth: 230 }}>
-                          {c.subject || "—"}
-                        </td>
-                        <td className="px-4 py-3.5">{date}</td>
-                        <td className="px-4 py-3.5">
-                          {deadline.toLocaleDateString("fr-FR")}
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <StatusBadge status={c.status} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {dashboardSorted.length === 0 && (
-                <div className="text-center py-16" style={{ color: C.inkSoft }}>
-                  <div
-                    className="text-lg"
-                    style={{ fontFamily: "Georgia, serif", color: C.navy800 }}>
-                    Aucun dossier à afficher
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {displayedView === "users" && userIsAdmin && (
-          <>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-              <div
-                className="lg:col-span-1 rounded-xl p-5"
-                style={{ background: "#fff", border: `1px solid ${C.line}` }}>
-                <div
-                  className="flex items-center gap-2 text-sm font-bold mb-3"
-                  style={{ color: C.navy900 }}>
-                  <Users size={15} /> Nouvel utilisateur
-                </div>
-                <form onSubmit={handleCreateUser} className="space-y-3">
-                  <Field label="Nom d'utilisateur">
-                    <input
-                      required
-                      value={userForm.username}
-                      onChange={(e) =>
-                        setUserForm((f) => ({ ...f, username: e.target.value }))
-                      }
-                      style={inputStyle}
-                      autoComplete="off"
-                    />
-                  </Field>
-                  <Field label="Email">
-                    <input
-                      required
-                      type="email"
-                      value={userForm.email}
-                      onChange={(e) =>
-                        setUserForm((f) => ({ ...f, email: e.target.value }))
-                      }
-                      style={inputStyle}
-                      autoComplete="email"
-                    />
-                  </Field>
-                  <Field label="Nom complet">
-                    <input
-                      value={userForm.fullName}
-                      onChange={(e) =>
-                        setUserForm((f) => ({ ...f, fullName: e.target.value }))
-                      }
-                      style={inputStyle}
-                      autoComplete="name"
-                    />
-                  </Field>
-                  <div className="text-xs" style={{ color: C.inkSoft }}>
-                    Le mot de passe temporaire sera affiché après création et
-                    devra être changé à la première connexion.
-                  </div>
-                  {usersError && (
-                    <div className="text-sm" style={{ color: C.red }}>
-                      {usersError}
-                    </div>
-                  )}
-                  <button
-                    type="submit"
-                    disabled={userCreateLoading}
-                    className="w-full px-4 py-2.5 rounded-lg text-sm font-semibold"
-                    style={{
-                      background: C.navy900,
-                      color: C.gold400,
-                      border: "none",
-                      cursor: "pointer",
-                      opacity: userCreateLoading ? 0.7 : 1,
-                    }}>
-                    {userCreateLoading ? "Création…" : "Créer l'utilisateur"}
-                  </button>
-                </form>
-
-                {temporaryPassword && (
-                  <div
-                    className="mt-4 rounded-lg p-4"
-                    style={{
-                      background: C.yellowBg,
-                      border: `1px solid ${C.line}`,
-                    }}>
-                    <div
-                      className="flex items-center gap-2 text-sm font-bold"
-                      style={{ color: C.yellow }}>
-                      <KeyRound size={15} /> Mot de passe temporaire
-                    </div>
-                    <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
-                      À transmettre manuellement à {temporaryPassword.username}.
-                      Ce mot de passe ne doit être partagé qu’une seule fois.
-                    </div>
-                    <div
-                      className="mt-3 rounded-md px-3 py-2 text-sm font-mono"
-                      style={{
-                        background: "#fff",
-                        border: `1px dashed ${C.line}`,
-                        color: C.navy900,
-                      }}>
-                      {temporaryPassword.password}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div
-                className="lg:col-span-2 rounded-xl overflow-hidden"
-                style={{ background: "#fff", border: `1px solid ${C.line}` }}>
-                <div
-                  className="flex items-center justify-between px-4 py-3 border-b"
-                  style={{ borderColor: C.line }}>
-                  <div>
-                    <div
-                      className="text-sm font-bold"
-                      style={{ color: C.navy900 }}>
-                      Utilisateurs de l'organisation
-                    </div>
-                    <div className="text-xs" style={{ color: C.inkSoft }}>
-                      Liste limitée à votre organisation courante.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={loadUsers}
-                    className="px-3 py-2 rounded-md text-xs font-semibold"
-                    style={{
-                      background: "transparent",
-                      border: `1px solid ${C.line}`,
-                      color: C.navy900,
-                      cursor: "pointer",
-                    }}>
-                    Actualiser
-                  </button>
-                </div>
-                {usersLoading ? (
-                  <div className="p-6 text-sm" style={{ color: C.inkSoft }}>
-                    Chargement des utilisateurs…
-                  </div>
-                ) : orgUsers.length === 0 ? (
-                  <div className="p-6 text-sm" style={{ color: C.inkSoft }}>
-                    Aucun utilisateur trouvé pour cette organisation.
-                  </div>
-                ) : (
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr style={{ background: C.paper2 }}>
-                        {["Utilisateur", "Rôle", "Email", "Métadonnées"].map(
-                          (h) => (
-                            <th
-                              key={h}
-                              className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase"
-                              style={{
-                                color: C.inkSoft,
-                                letterSpacing: "0.08em",
-                                borderBottom: `1px solid ${C.line}`,
-                              }}>
-                              {h}
-                            </th>
-                          ),
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {orgUsers.map((user) => (
-                        <tr
-                          key={
-                            user.id ||
-                            user.userId ||
-                            user.username ||
-                            user.email
-                          }
-                          style={{ borderBottom: "1px solid #ece8dc" }}>
-                          <td className="px-4 py-3.5">
-                            <div
-                              className="font-semibold"
-                              style={{ color: C.navy900 }}>
-                              {userDisplayName(user)}
-                            </div>
-                            <div
-                              className="text-xs"
-                              style={{ color: C.inkSoft }}>
-                              {user.username || "—"}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5 text-xs">
-                            <span
-                              className="inline-block px-2.5 py-1 rounded-full"
-                              style={{
-                                background: isAdminUser(user)
-                                  ? C.greenBg
-                                  : C.paper2,
-                                color: isAdminUser(user) ? C.green : C.inkSoft,
-                              }}>
-                              {roleLabel(user)}
-                            </span>
-                          </td>
-                          <td
-                            className="px-4 py-3.5 text-xs"
-                            style={{ color: C.inkSoft }}>
-                            {user.email || "—"}
-                          </td>
-                          <td
-                            className="px-4 py-3.5 text-xs"
-                            style={{ color: C.inkSoft }}>
-                            <div>
-                              {user.scope ? `Scope: ${user.scope}` : "—"}
-                            </div>
-                            {user.records !== undefined && (
-                              <div>{`Records: ${Array.isArray(user.records) ? user.records.length : user.records}`}</div>
-                            )}
-                            {user.userId && (
-                              <div>{`userId: ${user.userId}`}</div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-                {usersError && (
-                  <div className="px-4 py-3 text-sm" style={{ color: C.red }}>
-                    {usersError}
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
+          <Route
+            path="/dashboard"
+            element={
+              <DashboardPage
+                dashboardSorted={dashboardSorted}
+                green={green}
+                yellow={yellow}
+                red={red}
+                refFor={refFor}
+              />
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              userIsAdmin ? (
+                <UsersPage
+                  userForm={userForm}
+                  setUserForm={setUserForm}
+                  handleCreateUser={handleCreateUser}
+                  userCreateLoading={userCreateLoading}
+                  usersError={usersError}
+                  temporaryPassword={temporaryPassword}
+                  setTemporaryPassword={setTemporaryPassword}
+                  usersLoading={usersLoading}
+                  orgUsers={orgUsers}
+                  loadUsers={loadUsers}
+                />
+              ) : (
+                <Navigate to="/registre" />
+              )
+            }
+          />
+          <Route path="*" element={<Navigate to="/registre" />} />
+        </Routes>
 
         <p className="text-center text-xs mt-6" style={{ color: C.inkSoft }}>
           Registre interne WAFI CAPITAL — usage professionnel.
         </p>
       </div>
 
-      {/* -------------------- Request modal -------------------- */}
-      {modalOpen && (
-        <div
-          className="fixed inset-0 flex items-start justify-center overflow-y-auto p-6 z-50"
-          style={{ background: "rgba(10,24,48,0.45)" }}
-          onClick={(e) => e.target === e.currentTarget && closeModal()}>
-          <form
-            onSubmit={handleSubmit}
-            className="w-full rounded-xl p-7"
-            style={{
-              maxWidth: 640,
-              background: "#fff",
-              boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-            }}>
-            <span
-              className="inline-block text-xs font-bold px-2.5 py-1 rounded mb-3.5"
-              style={{ background: C.paper2, color: C.navy800 }}>
-              {editingId
-                ? refFor(contacts.find((c) => c.id === editingId))
-                : "Nouvelle référence"}
-            </span>
-            <h2
-              className="text-xl font-bold m-0 mb-1"
-              style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
-              {editingId ? "Modifier la demande" : "Nouvelle demande client"}
-            </h2>
-            <p className="text-xs mb-5" style={{ color: C.inkSoft }}>
-              Enregistrez le contact, le sujet, le délai statutaire et
-              l'historique des échanges.
-            </p>
+      {/* Request modal */}
+      <RequestModal
+        modalOpen={modalOpen}
+        closeModal={closeModal}
+        editingId={editingId}
+        applications={applications}
+        form={form}
+        setForm={setForm}
+        exchanges={exchanges}
+        exDraft={exDraft}
+        setExDraft={setExDraft}
+        saveError={saveError}
+        saving={saving}
+        handleSubmit={handleSubmit}
+        handleDelete={handleDelete}
+        addExchange={addExchange}
+        removeExchange={removeExchange}
+        refFor={refFor}
+      />
 
-            <div className="grid grid-cols-2 gap-3.5">
-              <Field label="Type de client">
-                <select
-                  value={form.clientType}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, clientType: e.target.value }))
-                  }
-                  style={inputStyle}>
-                  <option value="Société">Société</option>
-                  <option value="Personne physique">Personne physique</option>
-                </select>
-              </Field>
-              <Field
-                label={
-                  form.clientType === "Société"
-                    ? "Nom de la société"
-                    : "Référence / employeur (optionnel)"
-                }>
-                <input
-                  value={form.org}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, org: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </Field>
-              <Field label="Nom du contact">
-                <input
-                  required
-                  value={form.name}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, name: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </Field>
-              <Field label="Email">
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, email: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </Field>
-              <Field label="Téléphone">
-                <input
-                  value={form.phone}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, phone: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </Field>
-              <Field label="Pièce jointe (référence)">
-                <input
-                  placeholder="ex : Attestation.pdf"
-                  value={form.attachment}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, attachment: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </Field>
-              <div className="col-span-2">
-                <Field label="Sujet de la demande">
-                  <input
-                    required
-                    value={form.subject}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, subject: e.target.value }))
-                    }
-                    style={inputStyle}
-                  />
-                </Field>
-              </div>
-              <Field label="Date et heure de réception">
-                <input
-                  type="datetime-local"
-                  required
-                  value={form.receivedAt}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, receivedAt: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </Field>
-              <Field label="Délai de traitement statutaire (jours)">
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  value={form.delayDays}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, delayDays: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </Field>
-              <Field label="Statut">
-                <select
-                  value={form.status}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, status: e.target.value }))
-                  }
-                  style={inputStyle}>
-                  <option>Nouveau</option>
-                  <option>En cours</option>
-                  <option>Traité</option>
-                </select>
-              </Field>
-              <Field label="Date de clôture" hint="(si traité)">
-                <input
-                  type="date"
-                  value={form.treatedAt}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, treatedAt: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </Field>
-              <div className="col-span-2">
-                <Field label="Notes">
-                  <textarea
-                    rows={2}
-                    placeholder="Détails complémentaires sur la demande…"
-                    value={form.notes}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, notes: e.target.value }))
-                    }
-                    style={{ ...inputStyle, resize: "vertical" }}
-                  />
-                </Field>
-              </div>
-            </div>
-
-            {/* Attachments */}
-            {/* <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.line}` }}>
-              <div className="text-xs font-bold uppercase mb-2.5 flex items-center gap-1.5" style={{ color: C.navy800, letterSpacing: "0.05em" }}>
-                <Paperclip size={13} /> Pièces jointes (PDF)
-              </div>
-              {attachments.length === 0 ? (
-                <div className="text-xs italic mb-2.5" style={{ color: C.inkSoft }}>Aucun document PDF joint pour ce dossier.</div>
-              ) : (
-                <div className="flex flex-col gap-2 mb-2.5">
-                  {attachments.map(a => (
-                    <div key={a.id} className="flex items-center justify-between gap-2 rounded-md px-2.5 py-2 text-xs" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText size={14} style={{ color: C.navy700, flexShrink: 0 }} />
-                        <span className="font-semibold truncate">{a.filename}</span>
-                        <span style={{ color: C.inkSoft, flexShrink: 0 }}>{formatBytes(a.size)}</span>
-                      </div>
-                      <div className="flex gap-1 flex-shrink-0">
-                        <button type="button" onClick={() => downloadAttachment(a.id)} title="Télécharger" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 4 }}>
-                          <Download size={14} />
-                        </button>
-                        <button type="button" onClick={() => removeAttachment(a.id)} title="Retirer" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, padding: 4 }}>
-                          <X size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <input ref={fileInputRef} type="file" accept="application/pdf" multiple onChange={handleFiles} className="text-xs" />
-              <div className="text-[11px] mt-1" style={{ color: uploadWarning ? C.red : C.inkSoft }}>
-                {uploadWarning || "Fichiers PDF, 3,5 Mo maximum chacun."}
-              </div>
-            </div> */}
-
-            {/* Exchange history */}
-            <div
-              className="mt-5 pt-4"
-              style={{ borderTop: `1px solid ${C.line}` }}>
-              <div
-                className="text-xs font-bold uppercase mb-2.5"
-                style={{ color: C.navy800, letterSpacing: "0.05em" }}>
-                Historique des échanges
-              </div>
-              {exchanges.length === 0 ? (
-                <div
-                  className="text-xs italic mb-2.5"
-                  style={{ color: C.inkSoft }}>
-                  Aucun échange enregistré pour ce dossier.
-                </div>
-              ) : (
-                <div
-                  className="flex flex-col gap-2 mb-2.5"
-                  style={{ maxHeight: 150, overflowY: "auto" }}>
-                  {exchanges
-                    .slice()
-                    .sort((a, b) => new Date(b.date) - new Date(a.date))
-                    .map((ex) => (
-                      <div
-                        key={ex.id}
-                        className="relative rounded-md px-2.5 py-2 text-xs"
-                        style={{
-                          background: C.paper,
-                          border: `1px solid ${C.line}`,
-                        }}>
-                        <button
-                          type="button"
-                          onClick={() => removeExchange(ex.id)}
-                          style={{
-                            position: "absolute",
-                            top: 6,
-                            right: 8,
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: C.inkSoft,
-                          }}>
-                          <X size={12} />
-                        </button>
-                        <div
-                          className="text-[10.5px] font-bold uppercase mb-0.5"
-                          style={{ color: C.inkSoft }}>
-                          {ex.type} ·{" "}
-                          {new Date(ex.date).toLocaleDateString("fr-FR")}
-                        </div>
-                        <div>{ex.note}</div>
-                      </div>
-                    ))}
-                </div>
-              )}
-              <div
-                className="grid gap-2 items-end"
-                style={{ gridTemplateColumns: "1fr 1fr 2fr auto" }}>
-                <Field label="Date">
-                  <input
-                    type="date"
-                    value={exDraft.date}
-                    onChange={(e) =>
-                      setExDraft((d) => ({ ...d, date: e.target.value }))
-                    }
-                    style={inputStyle}
-                  />
-                </Field>
-                <Field label="Type">
-                  <select
-                    value={exDraft.type}
-                    onChange={(e) =>
-                      setExDraft((d) => ({ ...d, type: e.target.value }))
-                    }
-                    style={inputStyle}>
-                    <option>Email</option>
-                    <option>Appel</option>
-                    <option>WhatsApp</option>
-                    <option>Réunion</option>
-                    <option>Autre</option>
-                  </select>
-                </Field>
-                <Field label="Note">
-                  <input
-                    placeholder="Résumé de l'échange"
-                    value={exDraft.note}
-                    onChange={(e) =>
-                      setExDraft((d) => ({ ...d, note: e.target.value }))
-                    }
-                    style={inputStyle}
-                  />
-                </Field>
-                <button
-                  type="button"
-                  onClick={addExchange}
-                  className="px-3 py-2 rounded-md text-xs font-semibold"
-                  style={{
-                    background: "transparent",
-                    border: `1px solid ${C.line}`,
-                    color: C.navy900,
-                    cursor: "pointer",
-                  }}>
-                  Ajouter
-                </button>
-              </div>
-            </div>
-
-            {saveError && (
-              <div
-                className="text-sm mt-4"
-                role="alert"
-                style={{ color: C.red }}>
-                {saveError}
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2.5 mt-6">
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="mr-auto px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-1.5"
-                  style={{
-                    background: "transparent",
-                    border: `1px solid ${C.line}`,
-                    color: C.red,
-                    cursor: "pointer",
-                  }}>
-                  <Trash2 size={14} /> Supprimer
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={closeModal}
-                className="px-4 py-2.5 rounded-lg text-sm font-semibold"
-                style={{
-                  background: "transparent",
-                  border: `1px solid ${C.line}`,
-                  color: C.navy900,
-                  cursor: "pointer",
-                }}>
-                Annuler
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-4 py-2.5 rounded-lg text-sm font-semibold"
-                style={{
-                  background: C.navy900,
-                  color: C.gold400,
-                  border: "none",
-                  cursor: "pointer",
-                  opacity: saving ? 0.7 : 1,
-                }}>
-                {saving ? "Enregistrement…" : "Enregistrer"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* -------------------- Settings modal -------------------- */}
-      {settingsOpen && (
-        <div
-          className="fixed inset-0 flex items-start justify-center overflow-y-auto p-6 z-50"
-          style={{ background: "rgba(10,24,48,0.45)" }}
-          onClick={(e) =>
-            e.target === e.currentTarget && setSettingsOpen(false)
-          }>
-          <div
-            className="w-full rounded-xl p-7"
-            style={{
-              maxWidth: 420,
-              background: "#fff",
-              boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-            }}>
-            <h2
-              className="text-xl font-bold m-0 mb-1"
-              style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
-              Délai statutaire par défaut
-            </h2>
-            <p className="text-xs mb-5" style={{ color: C.inkSoft }}>
-              Appliqué automatiquement aux nouvelles demandes (modifiable au cas
-              par cas).
-            </p>
-            <Field label="Nombre de jours">
-              <input
-                type="number"
-                min="1"
-                value={defaultDelayDraft}
-                onChange={(e) => setDefaultDelayDraft(e.target.value)}
-                style={inputStyle}
-              />
-            </Field>
-            <div className="flex justify-end gap-2.5 mt-6">
-              <button
-                onClick={() => setSettingsOpen(false)}
-                className="px-4 py-2.5 rounded-lg text-sm font-semibold"
-                style={{
-                  background: "transparent",
-                  border: `1px solid ${C.line}`,
-                  color: C.navy900,
-                  cursor: "pointer",
-                }}>
-                Annuler
-              </button>
-              <button
-                onClick={saveSettings}
-                className="px-4 py-2.5 rounded-lg text-sm font-semibold"
-                style={{
-                  background: C.navy900,
-                  color: C.gold400,
-                  border: "none",
-                  cursor: "pointer",
-                }}>
-                Enregistrer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {detailRecord && (
-        <div
-          className="fixed inset-0 z-50 flex"
-          style={{ background: "rgba(10,24,48,0.45)" }}
-          onClick={(e) => e.target === e.currentTarget && closeDetail()}>
-          <div
-            className="ml-auto w-full max-w-xl h-full overflow-y-auto bg-white p-6 shadow-2xl"
-            style={{ minHeight: "100%" }}>
-            <div className="flex items-start justify-between gap-3 mb-6">
-              <div>
-                <div
-                  className="text-[10px] font-bold uppercase"
-                  style={{ color: C.gold500, letterSpacing: "0.18em" }}>
-                  {refFor(detailRecord)}
-                </div>
-                <h2
-                  className="text-2xl font-bold mt-2"
-                  style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
-                  Détails du dossier
-                </h2>
-                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
-                  Consultation des informations enregistrées et des pièces
-                  jointes.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={closeDetail}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: C.inkSoft,
-                  padding: 8,
-                }}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <div
-              className="grid gap-4 mb-6"
-              style={{ gridTemplateColumns: "1fr 1fr" }}>
-              <div
-                style={{
-                  background: C.paper,
-                  border: `1px solid ${C.line}`,
-                  borderRadius: 10,
-                  padding: 16,
-                }}>
-                <div
-                  className="text-xs font-bold uppercase mb-2"
-                  style={{ color: C.inkSoft }}>
-                  Contact
-                </div>
-                <div
-                  className="text-sm font-semibold"
-                  style={{ color: C.navy900 }}>
-                  {detailRecord.name || "—"}
-                </div>
-                <div className="text-xs" style={{ color: C.inkSoft }}>
-                  {detailRecord.org || "—"}
-                </div>
-                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
-                  {detailRecord.email || "—"}
-                </div>
-                <div className="text-xs" style={{ color: C.inkSoft }}>
-                  {detailRecord.phone || "—"}
-                </div>
-              </div>
-              <div
-                style={{
-                  background: C.paper,
-                  border: `1px solid ${C.line}`,
-                  borderRadius: 10,
-                  padding: 16,
-                }}>
-                <div
-                  className="text-xs font-bold uppercase mb-2"
-                  style={{ color: C.inkSoft }}>
-                  Statut
-                </div>
-                <StatusBadge status={detailRecord.status} />
-                <div className="text-xs mt-3" style={{ color: C.inkSoft }}>
-                  <strong>Sujet :</strong> {detailRecord.subject || "—"}
-                </div>
-                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
-                  <strong>Type :</strong> {detailRecord.clientType}
-                </div>
-                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
-                  <strong>Référence :</strong> {detailRecord.attachment || "—"}
-                </div>
-              </div>
-            </div>
-
-            <div
-              className="grid gap-4 mb-6"
-              style={{ gridTemplateColumns: "1fr 1fr" }}>
-              <div
-                style={{
-                  background: C.paper,
-                  border: `1px solid ${C.line}`,
-                  borderRadius: 10,
-                  padding: 16,
-                }}>
-                <div
-                  className="text-xs font-bold uppercase mb-2"
-                  style={{ color: C.inkSoft }}>
-                  Dates
-                </div>
-                <div className="text-xs" style={{ color: C.inkSoft }}>
-                  <strong>Reçu le :</strong>{" "}
-                  {formatDisplayDate(detailRecord.receivedAt).date}{" "}
-                  {formatDisplayDate(detailRecord.receivedAt).time}
-                </div>
-                <div className="text-xs" style={{ color: C.inkSoft }}>
-                  <strong>Traitement avant :</strong>{" "}
-                  {computeDeadline(detailRecord).toLocaleDateString("fr-FR")}
-                </div>
-                <div className="text-xs" style={{ color: C.inkSoft }}>
-                  <strong>Clôture :</strong>{" "}
-                  {detailRecord.treatedAt
-                    ? formatDisplayDate(detailRecord.treatedAt).date
-                    : "—"}
-                </div>
-              </div>
-              <div
-                style={{
-                  background: C.paper,
-                  border: `1px solid ${C.line}`,
-                  borderRadius: 10,
-                  padding: 16,
-                }}>
-                <div
-                  className="text-xs font-bold uppercase mb-2"
-                  style={{ color: C.inkSoft }}>
-                  Détails supplémentaires
-                </div>
-                <div className="text-xs" style={{ color: C.inkSoft }}>
-                  <strong>Délai :</strong> {detailRecord.delayDays} jours
-                </div>
-                <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
-                  <strong>Notes :</strong>
-                </div>
-                <div
-                  className="text-sm"
-                  style={{ color: C.inkSoft, whiteSpace: "pre-wrap" }}>
-                  {detailRecord.notes || "Aucune note."}
-                </div>
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <div
-                className="text-xs font-bold uppercase mb-3"
-                style={{ color: C.navy800, letterSpacing: "0.05em" }}>
-                Pièces jointes
-              </div>
-              {detailRecord.attachments?.length ? (
-                <div className="space-y-2">
-                  {detailRecord.attachments.map((att) => (
-                    <div
-                      key={att.id}
-                      className="flex items-center justify-between rounded-md px-3 py-2"
-                      style={{
-                        background: C.paper,
-                        border: `1px solid ${C.line}`,
-                      }}>
-                      <div>
-                        <div
-                          className="font-semibold text-sm"
-                          style={{ color: C.navy900 }}>
-                          {att.filename}
-                        </div>
-                        <div
-                          className="text-[11px]"
-                          style={{ color: C.inkSoft }}>
-                          {formatBytes(att.size)}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          downloadAttachment(att.id, detailRecord.attachments)
-                        }
-                        className="px-3 py-2 rounded-md text-xs font-semibold"
-                        style={{
-                          background: "transparent",
-                          border: `1px solid ${C.line}`,
-                          color: C.navy900,
-                          cursor: "pointer",
-                        }}>
-                        Télécharger
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs" style={{ color: C.inkSoft }}>
-                  Aucune pièce jointe enregistrée.
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div
-                className="text-xs font-bold uppercase mb-3"
-                style={{ color: C.navy800, letterSpacing: "0.05em" }}>
-                Historique des échanges
-              </div>
-              {detailRecord.exchanges?.length ? (
-                <div className="space-y-3">
-                  {detailRecord.exchanges
-                    .slice()
-                    .sort((a, b) => new Date(b.date) - new Date(a.date))
-                    .map((ex) => (
-                      <div
-                        key={ex.id}
-                        className="rounded-md px-3 py-2"
-                        style={{
-                          background: C.paper,
-                          border: `1px solid ${C.line}`,
-                        }}>
-                        <div
-                          className="text-[10.5px] font-bold uppercase"
-                          style={{ color: C.inkSoft }}>
-                          {ex.type} ·{" "}
-                          {new Date(ex.date).toLocaleDateString("fr-FR")}
-                        </div>
-                        <div
-                          className="text-sm mt-1"
-                          style={{ color: C.inkSoft }}>
-                          {ex.note}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <div className="text-xs" style={{ color: C.inkSoft }}>
-                  Aucun échange enregistré.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Detail modal */}
+      <DetailModal
+        detailRecord={detailRecord}
+        closeDetail={closeDetail}
+        formatDisplayDate={formatDisplayDate}
+        computeDeadline={computeDeadline}
+        refFor={refFor}
+        formatBytes={formatBytes}
+      />
     </div>
   );
 }

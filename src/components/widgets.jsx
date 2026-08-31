@@ -3,26 +3,24 @@
 // All modals, popups, and reusable UI components
 // ================================================================
 
-import React, { useRef } from "react";
+import React from "react";
 import {
-  Download,
   X,
-  FileText,
-  Paperclip,
   Trash2,
-  Eye,
-  EyeOff,
-  KeyRound,
 } from "lucide-react";
-import { C, MAX_FILE_BYTES } from "../utils/constants";
-import { formatBytes, downloadAttachment } from "../utils/helpers";
-
-console.log("[WIDGETS] Initializing widgets and components...");
+import {
+  C,
+  STATUS,
+  STATUS_LABELS,
+  CUSTOMER_TYPE,
+  CUSTOMER_TYPE_LABELS,
+  DEFAULT_PROCESSING_DAYS,
+} from "../utils/constants";
+import { formatBytes } from "../utils/helpers";
 
 // ==================== UI Atoms ====================
 
 export function Dot({ color }) {
-  console.log("[WIDGETS] Rendering Dot with color:", color);
   const map = { green: C.green, yellow: "#c99a1a", red: "#c1484d" };
   return (
     <span
@@ -33,23 +31,22 @@ export function Dot({ color }) {
 }
 
 export function StatusBadge({ status }) {
-  console.log("[WIDGETS] Rendering StatusBadge with status:", status);
   const styles = {
-    Nouveau: { bg: "#e4ebf5", color: C.navy800 },
-    "En cours": { bg: C.yellowBg, color: C.yellow },
-    Traité: { bg: C.greenBg, color: C.green },
+    [STATUS.NEW]: { bg: "#e4ebf5", color: C.navy800 },
+    [STATUS.IN_PROGRESS]: { bg: C.yellowBg, color: C.yellow },
+    [STATUS.PROCESSED]: { bg: C.greenBg, color: C.green },
+    [STATUS.REJECTED]: { bg: C.redBg, color: C.red },
   }[status] || { bg: C.paper2, color: C.ink };
   return (
     <span
       className="inline-block px-2.5 py-1 rounded-full text-xs font-bold"
       style={{ background: styles.bg, color: styles.color }}>
-      {status}
+      {STATUS_LABELS[status] || status}
     </span>
   );
 }
 
 export function Field({ label, children, hint }) {
-  console.log("[WIDGETS] Rendering Field with label:", label);
   return (
     <div>
       <label
@@ -79,35 +76,26 @@ export const inputStyle = {
   background: C.paper,
 };
 
-// ==================== Modals ====================
+// ==================== Request Modal ====================
 
 export function RequestModal({
   modalOpen,
   closeModal,
   editingId,
-  contacts,
+  applications,
   form,
   setForm,
   exchanges,
-  attachments,
   exDraft,
   setExDraft,
-  uploadWarning,
   saveError,
   saving,
   handleSubmit,
   handleDelete,
   addExchange,
   removeExchange,
-  removeAttachment,
-  downloadAttachment: downloadAtt,
-  handleFiles,
-  fileInputRef,
   refFor,
-  newId,
 }) {
-  console.log("[WIDGETS] Rendering RequestModal - editingId:", editingId);
-
   if (!modalOpen) return null;
 
   return (
@@ -127,7 +115,7 @@ export function RequestModal({
           className="inline-block text-xs font-bold px-2.5 py-1 rounded mb-3.5"
           style={{ background: C.paper2, color: C.navy800 }}>
           {editingId
-            ? refFor(contacts.find((c) => c.id === editingId))
+            ? refFor(applications.find((a) => a.id === editingId))
             : "Nouvelle référence"}
         </span>
         <h2
@@ -143,32 +131,33 @@ export function RequestModal({
         <div className="grid grid-cols-2 gap-3.5">
           <Field label="Type de client">
             <select
-              value={form.clientType}
+              value={form.typeOfCustomer}
               onChange={(e) =>
-                setForm((f) => ({ ...f, clientType: e.target.value }))
+                setForm((f) => ({ ...f, typeOfCustomer: e.target.value }))
               }
               style={inputStyle}>
-              <option value="Société">Société</option>
-              <option value="Personne physique">Personne physique</option>
+              {Object.values(CUSTOMER_TYPE).map((t) => (
+                <option key={t} value={t}>{CUSTOMER_TYPE_LABELS[t]}</option>
+              ))}
             </select>
           </Field>
           <Field
             label={
-              form.clientType === "Société"
+              form.typeOfCustomer === CUSTOMER_TYPE.COMPANY
                 ? "Nom de la société"
                 : "Référence / employeur (optionnel)"
             }>
             <input
-              value={form.org}
-              onChange={(e) => setForm((f) => ({ ...f, org: e.target.value }))}
+              value={form.companyName}
+              onChange={(e) => setForm((f) => ({ ...f, companyName: e.target.value }))}
               style={inputStyle}
             />
           </Field>
           <Field label="Nom du contact">
             <input
               required
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              value={form.contactName}
+              onChange={(e) => setForm((f) => ({ ...f, contactName: e.target.value }))}
               style={inputStyle}
             />
           </Field>
@@ -229,9 +218,9 @@ export function RequestModal({
               type="number"
               min="1"
               required
-              value={form.delayDays}
+              value={form.processingDays}
               onChange={(e) =>
-                setForm((f) => ({ ...f, delayDays: e.target.value }))
+                setForm((f) => ({ ...f, processingDays: e.target.value }))
               }
               style={inputStyle}
             />
@@ -243,17 +232,17 @@ export function RequestModal({
                 setForm((f) => ({ ...f, status: e.target.value }))
               }
               style={inputStyle}>
-              <option>Nouveau</option>
-              <option>En cours</option>
-              <option>Traité</option>
+              {Object.values(STATUS).map((s) => (
+                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+              ))}
             </select>
           </Field>
           <Field label="Date de clôture" hint="(si traité)">
             <input
               type="date"
-              value={form.treatedAt}
+              value={form.closingDate}
               onChange={(e) =>
-                setForm((f) => ({ ...f, treatedAt: e.target.value }))
+                setForm((f) => ({ ...f, closingDate: e.target.value }))
               }
               style={inputStyle}
             />
@@ -293,7 +282,7 @@ export function RequestModal({
                 .sort((a, b) => new Date(b.date) - new Date(a.date))
                 .map((ex) => (
                   <div
-                    key={ex.id}
+                    key={ex.id || `${ex.date}-${ex.type}`}
                     className="relative rounded-md px-2.5 py-2 text-xs"
                     style={{
                       background: C.paper,
@@ -319,7 +308,7 @@ export function RequestModal({
                       {ex.type} ·{" "}
                       {new Date(ex.date).toLocaleDateString("fr-FR")}
                     </div>
-                    <div>{ex.note}</div>
+                    <div>{ex.summary}</div>
                   </div>
                 ))}
             </div>
@@ -345,18 +334,18 @@ export function RequestModal({
                 }
                 style={inputStyle}>
                 <option>Email</option>
-                <option>Appel</option>
-                <option>WhatsApp</option>
-                <option>Réunion</option>
-                <option>Autre</option>
+                <option>Phone</option>
+                <option>Note</option>
+                <option>Meeting</option>
+                <option>Other</option>
               </select>
             </Field>
             <Field label="Note">
               <input
                 placeholder="Résumé de l'échange"
-                value={exDraft.note}
+                value={exDraft.summary}
                 onChange={(e) =>
-                  setExDraft((d) => ({ ...d, note: e.target.value }))
+                  setExDraft((d) => ({ ...d, summary: e.target.value }))
                 }
                 style={inputStyle}
               />
@@ -428,87 +417,16 @@ export function RequestModal({
   );
 }
 
-export function SettingsModal({
-  settingsOpen,
-  setSettingsOpen,
-  defaultDelayDraft,
-  setDefaultDelayDraft,
-  saveSettings,
-}) {
-  console.log("[WIDGETS] Rendering SettingsModal");
-
-  if (!settingsOpen) return null;
-
-  return (
-    <div
-      className="fixed inset-0 flex items-start justify-center overflow-y-auto p-6 z-50"
-      style={{ background: "rgba(10,24,48,0.45)" }}
-      onClick={(e) => e.target === e.currentTarget && setSettingsOpen(false)}>
-      <div
-        className="w-full rounded-xl p-7"
-        style={{
-          maxWidth: 420,
-          background: "#fff",
-          boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-        }}>
-        <h2
-          className="text-xl font-bold m-0 mb-1"
-          style={{ fontFamily: "Georgia, serif", color: C.navy950 }}>
-          Délai statutaire par défaut
-        </h2>
-        <p className="text-xs mb-5" style={{ color: C.inkSoft }}>
-          Appliqué automatiquement aux nouvelles demandes (modifiable au cas par
-          cas).
-        </p>
-        <Field label="Nombre de jours">
-          <input
-            type="number"
-            min="1"
-            value={defaultDelayDraft}
-            onChange={(e) => setDefaultDelayDraft(e.target.value)}
-            style={inputStyle}
-          />
-        </Field>
-        <div className="flex justify-end gap-2.5 mt-6">
-          <button
-            onClick={() => setSettingsOpen(false)}
-            className="px-4 py-2.5 rounded-lg text-sm font-semibold"
-            style={{
-              background: "transparent",
-              border: `1px solid ${C.line}`,
-              color: C.navy900,
-              cursor: "pointer",
-            }}>
-            Annuler
-          </button>
-          <button
-            onClick={saveSettings}
-            className="px-4 py-2.5 rounded-lg text-sm font-semibold"
-            style={{
-              background: C.navy900,
-              color: C.gold400,
-              border: "none",
-              cursor: "pointer",
-            }}>
-            Enregistrer
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ==================== Detail Modal ====================
 
 export function DetailModal({
   detailRecord,
   closeDetail,
   formatDisplayDate,
   computeDeadline,
-  downloadAttachment: downloadAtt,
   refFor,
   formatBytes,
 }) {
-  console.log("[WIDGETS] Rendering DetailModal for contact:", detailRecord?.id);
-
   if (!detailRecord) return null;
 
   return (
@@ -565,10 +483,10 @@ export function DetailModal({
               Contact
             </div>
             <div className="text-sm font-semibold" style={{ color: C.navy900 }}>
-              {detailRecord.name || "—"}
+              {detailRecord.contactName || "—"}
             </div>
             <div className="text-xs" style={{ color: C.inkSoft }}>
-              {detailRecord.org || "—"}
+              {detailRecord.companyName || "—"}
             </div>
             <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
               {detailRecord.email || "—"}
@@ -594,7 +512,7 @@ export function DetailModal({
               <strong>Sujet :</strong> {detailRecord.subject || "—"}
             </div>
             <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
-              <strong>Type :</strong> {detailRecord.clientType}
+              <strong>Type :</strong> {CUSTOMER_TYPE_LABELS[detailRecord.typeOfCustomer] || detailRecord.typeOfCustomer}
             </div>
             <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
               <strong>Référence :</strong> {detailRecord.attachment || "—"}
@@ -628,8 +546,8 @@ export function DetailModal({
             </div>
             <div className="text-xs" style={{ color: C.inkSoft }}>
               <strong>Clôture :</strong>{" "}
-              {detailRecord.treatedAt
-                ? formatDisplayDate(detailRecord.treatedAt).date
+              {detailRecord.closingDate
+                ? formatDisplayDate(detailRecord.closingDate).date
                 : "—"}
             </div>
           </div>
@@ -646,7 +564,7 @@ export function DetailModal({
               Détails supplémentaires
             </div>
             <div className="text-xs" style={{ color: C.inkSoft }}>
-              <strong>Délai :</strong> {detailRecord.delayDays} jours
+              <strong>Délai :</strong> {detailRecord.processingDays} jours
             </div>
             <div className="text-xs mt-2" style={{ color: C.inkSoft }}>
               <strong>Notes :</strong>
@@ -663,56 +581,6 @@ export function DetailModal({
           <div
             className="text-xs font-bold uppercase mb-3"
             style={{ color: C.navy800, letterSpacing: "0.05em" }}>
-            Pièces jointes
-          </div>
-          {detailRecord.attachments?.length ? (
-            <div className="space-y-2">
-              {detailRecord.attachments.map((att) => (
-                <div
-                  key={att.id}
-                  className="flex items-center justify-between rounded-md px-3 py-2"
-                  style={{
-                    background: C.paper,
-                    border: `1px solid ${C.line}`,
-                  }}>
-                  <div>
-                    <div
-                      className="font-semibold text-sm"
-                      style={{ color: C.navy900 }}>
-                      {att.filename}
-                    </div>
-                    <div className="text-[11px]" style={{ color: C.inkSoft }}>
-                      {formatBytes(att.size)}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      downloadAtt(att.id, detailRecord.attachments)
-                    }
-                    className="px-3 py-2 rounded-md text-xs font-semibold"
-                    style={{
-                      background: "transparent",
-                      border: `1px solid ${C.line}`,
-                      color: C.navy900,
-                      cursor: "pointer",
-                    }}>
-                    Télécharger
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs" style={{ color: C.inkSoft }}>
-              Aucune pièce jointe enregistrée.
-            </div>
-          )}
-        </div>
-
-        <div>
-          <div
-            className="text-xs font-bold uppercase mb-3"
-            style={{ color: C.navy800, letterSpacing: "0.05em" }}>
             Historique des échanges
           </div>
           {detailRecord.exchanges?.length ? (
@@ -722,7 +590,7 @@ export function DetailModal({
                 .sort((a, b) => new Date(b.date) - new Date(a.date))
                 .map((ex) => (
                   <div
-                    key={ex.id}
+                    key={ex.id || `${ex.date}-${ex.type}`}
                     className="rounded-md px-3 py-2"
                     style={{
                       background: C.paper,
@@ -735,7 +603,7 @@ export function DetailModal({
                       {new Date(ex.date).toLocaleDateString("fr-FR")}
                     </div>
                     <div className="text-sm mt-1" style={{ color: C.inkSoft }}>
-                      {ex.note}
+                      {ex.summary}
                     </div>
                   </div>
                 ))}
@@ -750,5 +618,3 @@ export function DetailModal({
     </div>
   );
 }
-
-console.log("[WIDGETS] All widgets loaded successfully");

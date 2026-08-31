@@ -9,24 +9,18 @@ import { C } from "../utils/constants";
 import { Field, inputStyle } from "../components/widgets";
 import { userDisplayName, roleLabel, isAdminUser } from "../utils/helpers";
 
-console.log("[USERS_PAGE] Initializing Users Management Page component...");
-
 export function UsersPage({
   userForm,
   setUserForm,
   handleCreateUser,
   userCreateLoading,
   usersError,
-  setUsersError,
   temporaryPassword,
   setTemporaryPassword,
   usersLoading,
   orgUsers,
   loadUsers,
 }) {
-  console.log("[USERS_PAGE] Rendering Users Management Page");
-  console.log("[USERS_PAGE] Total users:', orgUsers.length");
-
   return (
     <>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
@@ -39,10 +33,7 @@ export function UsersPage({
               <input
                 required
                 value={userForm.username}
-                onChange={(e) => {
-                  console.log("[USERS_PAGE] Username field changed");
-                  setUserForm((f) => ({ ...f, username: e.target.value }));
-                }}
+                onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))}
                 style={inputStyle}
                 autoComplete="off"
               />
@@ -52,23 +43,9 @@ export function UsersPage({
                 required
                 type="email"
                 value={userForm.email}
-                onChange={(e) => {
-                  console.log("[USERS_PAGE] Email field changed");
-                  setUserForm((f) => ({ ...f, email: e.target.value }));
-                }}
+                onChange={(e) => setUserForm((f) => ({ ...f, email: e.target.value }))}
                 style={inputStyle}
                 autoComplete="email"
-              />
-            </Field>
-            <Field label="Nom complet">
-              <input
-                value={userForm.fullName}
-                onChange={(e) => {
-                  console.log("[USERS_PAGE] Full name field changed");
-                  setUserForm((f) => ({ ...f, fullName: e.target.value }));
-                }}
-                style={inputStyle}
-                autoComplete="name"
               />
             </Field>
             <div className="text-xs" style={{ color: C.inkSoft }}>
@@ -85,8 +62,7 @@ export function UsersPage({
                 border: "none",
                 cursor: "pointer",
                 opacity: userCreateLoading ? 0.7 : 1,
-              }}
-            >
+              }}>
               {userCreateLoading ? "Création…" : "Créer l'utilisateur"}
             </button>
           </form>
@@ -104,13 +80,9 @@ export function UsersPage({
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  console.log("[USERS_PAGE] Clearing temporary password");
-                  setTemporaryPassword(null);
-                }}
+                onClick={() => setTemporaryPassword(null)}
                 className="mt-2 w-full text-xs"
-                style={{ background: "transparent", border: "none", color: C.navy800, cursor: "pointer", fontWeight: 500 }}
-              >
+                style={{ background: "transparent", border: "none", color: C.navy800, cursor: "pointer", fontWeight: 500 }}>
                 Fermer
               </button>
             </div>
@@ -129,13 +101,9 @@ export function UsersPage({
             </div>
             <button
               type="button"
-              onClick={() => {
-                console.log("[USERS_PAGE] Refreshing users list");
-                loadUsers();
-              }}
+              onClick={() => loadUsers()}
               className="px-3 py-2 rounded-md text-xs font-semibold"
-              style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.navy900, cursor: "pointer" }}
-            >
+              style={{ background: "transparent", border: `1px solid ${C.line}`, color: C.navy900, cursor: "pointer" }}>
               Actualiser
             </button>
           </div>
@@ -159,52 +127,41 @@ export function UsersPage({
                 </tr>
               </thead>
               <tbody>
-                {orgUsers.map((user) => {
-                  console.log("[USERS_PAGE] Rendering user row:', user.username || user.email");
-                  return (
-                    <tr key={user.id || user.userId || user.username || user.email} style={{ borderBottom: "1px solid #ece8dc" }}>
-                      <td className="px-4 py-3.5">
-                        <div className="font-semibold" style={{ color: C.navy900 }}>
-                          {userDisplayName(user)}
-                        </div>
-                        <div className="text-xs" style={{ color: C.inkSoft }}>
-                          {user.username || "—"}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs">
-                        <span
-                          className="inline-block px-2.5 py-1 rounded-full"
-                          style={{
-                            background: isAdminUser(user) ? C.greenBg : C.paper2,
-                            color: isAdminUser(user) ? C.green : C.inkSoft,
-                          }}
-                        >
-                          {roleLabel(user)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs" style={{ color: C.inkSoft }}>
-                        {user.email || "—"}
-                      </td>
-                      <td className="px-4 py-3.5 text-xs" style={{ color: C.inkSoft }}>
-                        <div>{user.scope ? `Scope: ${user.scope}` : "—"}</div>
-                        {user.records !== undefined && <div>{`Records: ${Array.isArray(user.records) ? user.records.length : user.records}`}</div>}
-                        {user.userId && <div>{`userId: ${user.userId}`}</div>}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {orgUsers.map((user) => (
+                  <tr key={user.id || user.userId || user.username || user.email} style={{ borderBottom: "1px solid #ece8dc" }}>
+                    <td className="px-4 py-3.5">
+                      <div className="font-semibold" style={{ color: C.navy900 }}>
+                        {userDisplayName(user)}
+                      </div>
+                      <div className="text-xs" style={{ color: C.inkSoft }}>
+                        {user.username || "—"}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 text-xs">
+                      <span
+                        className="inline-block px-2.5 py-1 rounded-full"
+                        style={{
+                          background: isAdminUser(user) ? C.greenBg : C.paper2,
+                          color: isAdminUser(user) ? C.green : C.inkSoft,
+                        }}>
+                        {roleLabel(user)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 text-xs" style={{ color: C.inkSoft }}>
+                      {user.email || "—"}
+                    </td>
+                    <td className="px-4 py-3.5 text-xs" style={{ color: C.inkSoft }}>
+                      <div>{user.scope ? `Scope: ${user.scope}` : "—"}</div>
+                      {user.records !== undefined && <div>{`Records: ${Array.isArray(user.records) ? user.records.length : user.records}`}</div>}
+                      {user.userId && <div>{`userId: ${user.userId}`}</div>}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          )}
-          {usersError && (
-            <div className="px-4 py-3 text-sm" style={{ color: C.red }}>
-              {usersError}
-            </div>
           )}
         </div>
       </div>
     </>
   );
 }
-
-console.log("[USERS_PAGE] Users Management Page component loaded successfully");
