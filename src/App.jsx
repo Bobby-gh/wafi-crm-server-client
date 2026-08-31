@@ -139,7 +139,7 @@ export default function WafiCRM() {
     setUsersError("");
     setTemporaryPassword(null);
     setCanManageUsers(false);
-    navigate("/registre");
+    // Navigation handled by Routes redirect
   }
 
   async function loadApplications() {
@@ -170,7 +170,8 @@ export default function WafiCRM() {
     );
     setIsAuthenticated(true);
     setMustChangePassword(Boolean(user?.mustChangePassword));
-    navigate("/registre");
+    // Navigate to registre only after auth is confirmed
+    if (!user?.mustChangePassword) navigate("/registre");
   }
 
   async function loadUsers(allowProbe = false, userOverride = null) {
@@ -576,12 +577,10 @@ export default function WafiCRM() {
   const userIsAdmin = isAdminUser(currentUser) || canManageUsers;
   const organizationLabel =
     organizationName || normalizeOrganizationName(currentUser, "");
-  const currentPath = location.pathname.replace("/", "") || "registre";
-  const displayedView = userIsAdmin
-    ? currentPath
-    : currentPath === "users"
-      ? "registre"
-      : currentPath;
+  const currentPath = location.pathname.replace(/^\//, "");
+  const displayedView = currentPath === "" || currentPath === "users" && !userIsAdmin
+    ? "registre"
+    : currentPath;
 
   // ================================================================
   // Render: single stable wrapper — avoids removeChild DOM mismatch
@@ -809,6 +808,7 @@ export default function WafiCRM() {
 
         {/* Routes */}
         <Routes>
+          <Route path="/" element={<Navigate to="/registre" />} />
           <Route
             path="/registre"
             element={
