@@ -267,11 +267,11 @@ export default function WafiCRM() {
           });
 
       const nextUser = data.user || {
-        username: data.username || payload.username,
+        username: data.username || authForm.username,
         organizationName: data.organizationName || authForm.organizationName,
         mustChangePassword: data.mustChangePassword,
       };
-      const nextUsername = nextUser.username || payload.username;
+      const nextUsername = nextUser.username || authForm.username;
       setAuthToken(data.token, nextUsername);
       applyUserSession(nextUser, nextUsername);
 
@@ -383,15 +383,13 @@ export default function WafiCRM() {
 
   async function handleLogout() {
     try {
-     const response = await apiLogout();
-     console.log("Logout response:", response);
-     //route to login page
-     
+      await apiLogout();
     } catch {
       // ok
     } finally {
       resetSession();
       setAuthMode("login");
+      navigate("/");
     }
   }
 
